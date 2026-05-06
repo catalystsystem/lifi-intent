@@ -12,6 +12,10 @@ broadcast/
 # Docs
 docs/
 
+# Node
+node_modules/
+bun.lock
+
 # Dotenv file
 .env
 
