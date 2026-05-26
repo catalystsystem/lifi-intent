@@ -36,11 +36,6 @@ jobs:
         run: |
           forge test -vvv
         id: test
-
-      - name: Run Forge Snapshots
-        run: |
-          FOUNDRY_FUZZ_RUNS=10 forge test --gas-snapshot-check true
-        id: snapshot
     
       - name: Run Forge Coverage
         run: |

@@ -2,7 +2,7 @@
   "CompactFinaliseFor": "101978",
   "CompactFinaliseSelf": "94549",
   "CompactFinaliseTo": "94549",
-  "EscrowFinalise": "44316",
+  "EscrowFinalise": "69922",
   "IntegrationCoinFill": "64965",
   "IntegrationCompactFinaliseSelf": "85359",
   "IntegrationWormholeReceiveMessage": "45665",
@@ -10,12 +10,13 @@
   "broadcast": "14904",
   "compactFinaliseSelfWithFee": "164087",
   "depositAndRegisterFor": "129887",
-  "escrowFinaliseSelfWithFee": "106519",
-  "escrowFinaliseWithSignature": "51505",
+  "escrowFinaliseSelfWithFee": "106455",
+  "escrowFinaliseWithSignature": "77111",
   "escrowOpen": "56999",
   "escrowOpenFor3009Single": "85640",
   "escrowOpenFor3009SingleArray": "90796",
   "escrowOpenFor3009Two": "140807",
   "escrowOpenForMsgSender": "57219",
-  "escrowOpenForPermit2": "94897"
+  "escrowOpenForPermit2": "94897",
+  "tronEscrowFinaliseSelfWithFee": "133263"
 }

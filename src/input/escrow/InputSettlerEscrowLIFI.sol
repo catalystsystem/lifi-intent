@@ -44,7 +44,7 @@ contract InputSettlerEscrowLIFI is InputSettlerEscrow, GovernanceFee {
      * by the EIP712 base contract.
      * @return name The domain name.
      */
-    function _domainName() internal pure override returns (string memory) {
+    function _domainName() internal pure virtual override returns (string memory) {
         return "OIFEscrowLIFI";
     }
 
@@ -228,13 +228,17 @@ contract InputSettlerEscrowLIFI is InputSettlerEscrow, GovernanceFee {
 
             uint256 calculatedFee = _calcFee(amount, fee);
             if (calculatedFee > 0) {
-                SafeTransferLib.safeTransfer(token, _owner, calculatedFee);
+                _transfer(token, _owner, calculatedFee);
                 unchecked {
                     amount = amount - calculatedFee;
                 }
             }
 
-            SafeTransferLib.safeTransfer(token, destination, amount);
+            _transfer(token, destination, amount);
         }
+    }
+
+    function _transfer(address token, address to, uint256 amount) internal virtual {
+        SafeTransferLib.safeTransfer(token, to, amount);
     }
 }
