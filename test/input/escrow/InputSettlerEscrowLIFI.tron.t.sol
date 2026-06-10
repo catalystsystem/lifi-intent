@@ -27,8 +27,16 @@ contract InputSettlerEscrowLIFITronHarness is InputSettlerEscrowLIFITron {
 }
 
 contract InputSettlerEscrowLIFITronTest is InputSettlerEscrowTest {
+    /// @dev Tron Permit2 deployment: TTJxU3P8rHycAyFY4kVtGNfmnMH4ezcuM9.
+    address constant TRON_PERMIT2 = 0xBE365314f2E77FD1257d60C346Bb32DbDa369403;
+
     function setUp() public virtual override {
         super.setUp();
+
+        // Host a Permit2 instance at the Tron address by copying the canonical runtime code,
+        // and point the base test helpers at it.
+        vm.etch(TRON_PERMIT2, permit2.code);
+        permit2 = TRON_PERMIT2;
 
         owner = makeAddr("owner");
         inputSettlerEscrow = address(new InputSettlerEscrowLIFITronHarness(owner));
