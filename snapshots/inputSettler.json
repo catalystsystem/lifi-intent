@@ -1,4 +1,5 @@
 {
+  "BasePurchaseOrder": "138441",
   "CompactFinaliseFor": "127146",
   "CompactFinaliseSelf": "119716",
   "CompactFinaliseTo": "119716",
@@ -18,5 +19,9 @@
   "escrowOpenFor3009Two": "140807",
   "escrowOpenForMsgSender": "57219",
   "escrowOpenForPermit2": "95043",
-  "tronEscrowFinaliseSelfWithFee": "133248"
+  "maxTimestamp1": "461",
+  "minTimestamp1": "483",
+  "tronEscrowFinaliseSelfWithFee": "133248",
+  "validate2Fills": "9838",
+  "validate2FillsMultipleSolvers": "9838"
 }
