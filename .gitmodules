@@ -1,9 +1,6 @@
 [submodule "lib/forge-std"]
 	path = lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
-[submodule "lib/bitcoinprism-evm"]
-	path = lib/bitcoinprism-evm
-	url = https://github.com/catalystdao/bitcoinprism-evm
 [submodule "lib/solady"]
 	path = lib/solady
 	url = https://github.com/Vectorized/solady
@@ -13,6 +10,12 @@
 [submodule "lib/permit2"]
 	path = lib/permit2
 	url = https://github.com/Uniswap/permit2
-[submodule "lib/OIF"]
-	path = lib/OIF
-	url = https://github.com/openintentsframework/OIF
+[submodule "lib/openzeppelin-contracts"]
+	path = lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "lib/broadcaster"]
+	path = lib/broadcaster
+	url = https://github.com/openintentsframework/broadcaster
+[submodule "lib/tron-contracts"]
+	path = lib/tron-contracts
+	url = https://github.com/OpenZeppelin/tron-contracts

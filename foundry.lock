@@ -1,12 +1,12 @@
 {
-  "lib/OIF": {
-    "rev": "df415ead6ac049319bf6de2fa55d47c4c34242e0"
-  },
-  "lib/bitcoinprism-evm": {
-    "rev": "158ff5e6361ba6813f37135c3635d6a88c6b3407"
+  "lib/broadcaster": {
+    "rev": "6be64bee7534e41752ba037a3b0e2f46fe6478be"
   },
   "lib/forge-std": {
     "rev": "77041d2ce690e692d6e03cc812b57d1ddaa4d505"
+  },
+  "lib/openzeppelin-contracts": {
+    "rev": "f95b9ce3f1e75d9410f293f0ffb5c55711da8a18"
   },
   "lib/permit2": {
     "rev": "cc56ad0f3439c502c246fc5cfcc3db92bb8b7219"
@@ -16,5 +16,8 @@
   },
   "lib/the-compact": {
     "rev": "b9c3b544151106a23b8f9d800751166a6089cf00"
+  },
+  "lib/tron-contracts": {
+    "rev": "ae352da879a36ce23afd7d1683af1ca489b74c05"
   }
 }
