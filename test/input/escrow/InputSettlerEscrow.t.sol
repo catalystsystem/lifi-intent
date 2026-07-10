@@ -432,6 +432,222 @@ contract InputSettlerEscrowTest is InputSettlerEscrowTestBase {
         assertEq(uint8(status), uint8(InputSettlerEscrow.OrderStatus.Refunded));
     }
 
+    // -- Quick refund (provable non-fill) -- //
+
+    function _openOrderForNonFill(
+        address inputOracle,
+        uint32 fillDeadline,
+        uint32 expires,
+        uint128 amount
+    ) internal returns (StandardOrder memory order, bytes32 orderId) {
+        vm.assume(amount > 0);
+
+        token.mint(swapper, amount);
+        vm.prank(swapper);
+        token.approve(inputSettlerEscrow, amount);
+
+        MandateOutput[] memory outputs = new MandateOutput[](1);
+        outputs[0] = MandateOutput({
+            settler: address(outputSettlerCoin).toIdentifier(),
+            oracle: makeAddr("outputOracle").toIdentifier(),
+            chainId: block.chainid,
+            token: address(anotherToken).toIdentifier(),
+            amount: amount,
+            recipient: swapper.toIdentifier(),
+            callbackData: hex"",
+            context: hex""
+        });
+        uint256[2][] memory inputs = new uint256[2][](1);
+        inputs[0] = [uint256(uint160(address(token))), amount];
+
+        order = StandardOrder({
+            user: swapper,
+            nonce: 0,
+            originChainId: block.chainid,
+            expires: expires,
+            fillDeadline: fillDeadline,
+            inputOracle: inputOracle,
+            inputs: inputs,
+            outputs: outputs
+        });
+
+        vm.prank(swapper);
+        IInputSettlerEscrow(inputSettlerEscrow).open(order);
+
+        orderId = InputSettlerEscrow(inputSettlerEscrow).orderIdentifier(order);
+    }
+
+    function _nonFillProofSeries(
+        StandardOrder memory order,
+        bytes32 orderId,
+        uint32 fillDeadline
+    ) internal pure returns (bytes memory) {
+        MandateOutput memory output = order.outputs[0];
+        return abi.encodePacked(
+            output.chainId,
+            output.oracle,
+            output.settler,
+            keccak256(MandateOutputEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, output))
+        );
+    }
+
+    /// forge-config: default.isolate = true
+    function test_refund_on_non_fill_gas() public {
+        test_refund_on_non_fill(1e18 / 10);
+    }
+
+    function test_refund_on_non_fill(
+        uint128 amount
+    ) public {
+        uint32 fillDeadline = uint32(block.timestamp + 10 minutes);
+        uint32 expires = uint32(block.timestamp + 5 hours);
+        (StandardOrder memory order, bytes32 orderId) =
+            _openOrderForNonFill(alwaysYesOracle, fillDeadline, expires, amount);
+
+        vm.warp(fillDeadline + 1);
+
+        uint256 amountBeforeRefund = token.balanceOf(swapper);
+
+        // The proof record must be the (chainId, oracle, settler, notFilledHash) tuple of the missing output.
+        vm.expectCall(
+            alwaysYesOracle,
+            abi.encodeWithSignature("efficientRequireProven(bytes)", _nonFillProofSeries(order, orderId, fillDeadline))
+        );
+        vm.expectEmit();
+        emit InputSettlerEscrow.Refunded(orderId);
+
+        IInputSettlerEscrow(inputSettlerEscrow).refundOnNonFill(order, 0);
+        vm.snapshotGasLastCall("inputSettler", "escrowRefundOnNonFill");
+
+        // The user got their inputs back well before order.expires.
+        assertLt(block.timestamp, order.expires);
+        assertEq(token.balanceOf(swapper), amountBeforeRefund + amount);
+        assertEq(
+            uint8(InputSettlerEscrow(inputSettlerEscrow).orderStatus(orderId)),
+            uint8(InputSettlerEscrow.OrderStatus.Refunded)
+        );
+    }
+
+    function test_revert_refund_on_non_fill_before_fill_deadline() public {
+        uint32 fillDeadline = uint32(block.timestamp + 10 minutes);
+        (StandardOrder memory order,) =
+            _openOrderForNonFill(alwaysYesOracle, fillDeadline, uint32(block.timestamp + 5 hours), 1e18 / 10);
+
+        // Boundary: exactly the fill deadline is still too early.
+        vm.warp(fillDeadline);
+        vm.expectRevert(InputSettlerBase.TimestampNotPassed.selector);
+        IInputSettlerEscrow(inputSettlerEscrow).refundOnNonFill(order, 0);
+    }
+
+    function test_revert_refund_on_non_fill_wrong_chain() public {
+        uint32 fillDeadline = uint32(block.timestamp + 10 minutes);
+        (StandardOrder memory order,) =
+            _openOrderForNonFill(alwaysYesOracle, fillDeadline, uint32(block.timestamp + 5 hours), 1e18 / 10);
+
+        order.originChainId = block.chainid + 1;
+        vm.warp(fillDeadline + 1);
+        vm.expectRevert(
+            abi.encodeWithSelector(InputSettlerBase.WrongChain.selector, block.chainid + 1, block.chainid)
+        );
+        IInputSettlerEscrow(inputSettlerEscrow).refundOnNonFill(order, 0);
+    }
+
+    /// @dev Uses this contract as the input oracle (efficientRequireProven reverts unless the exact proof series was
+    /// marked valid): only an attestation of the not-filled description built from the SIGNED fillDeadline releases
+    /// the escrow — fill attestations (cross-consumption) and fabricated deadlines do not.
+    function test_refund_on_non_fill_requires_exact_non_fill_proof() public {
+        uint32 fillDeadline = uint32(block.timestamp + 10 minutes);
+        (StandardOrder memory order, bytes32 orderId) =
+            _openOrderForNonFill(address(this), fillDeadline, uint32(block.timestamp + 5 hours), 1e18 / 10);
+
+        vm.warp(fillDeadline + 1);
+
+        // Nothing proven.
+        vm.expectRevert(InvalidProofSeries.selector);
+        IInputSettlerEscrow(inputSettlerEscrow).refundOnNonFill(order, 0);
+
+        // A proven FILL of the same output must not be consumable as a non-fill.
+        MandateOutput memory output = order.outputs[0];
+        bytes memory fillProofSeries = abi.encodePacked(
+            output.chainId,
+            output.oracle,
+            output.settler,
+            keccak256(
+                MandateOutputEncodingLib.encodeFillDescriptionMemory(
+                    solver.toIdentifier(), orderId, fillDeadline, output
+                )
+            )
+        );
+        _validProofSeries[fillProofSeries] = true;
+        vm.expectRevert(InvalidProofSeries.selector);
+        IInputSettlerEscrow(inputSettlerEscrow).refundOnNonFill(order, 0);
+
+        // A non-fill attested against a different (fabricated) deadline is inert.
+        _validProofSeries[_nonFillProofSeries(order, orderId, fillDeadline + 1)] = true;
+        vm.expectRevert(InvalidProofSeries.selector);
+        IInputSettlerEscrow(inputSettlerEscrow).refundOnNonFill(order, 0);
+
+        // The exact proof releases the escrow.
+        _validProofSeries[_nonFillProofSeries(order, orderId, fillDeadline)] = true;
+        IInputSettlerEscrow(inputSettlerEscrow).refundOnNonFill(order, 0);
+        assertEq(
+            uint8(InputSettlerEscrow(inputSettlerEscrow).orderStatus(orderId)),
+            uint8(InputSettlerEscrow.OrderStatus.Refunded)
+        );
+    }
+
+    /// @dev Settlement is one-shot: whichever of finalise / refundOnNonFill lands first wins, the other reverts.
+    function test_revert_refund_on_non_fill_after_finalise_one_shot() public {
+        uint32 fillDeadline = uint32(block.timestamp + 10 minutes);
+        (StandardOrder memory order, bytes32 orderId) =
+            _openOrderForNonFill(alwaysYesOracle, fillDeadline, uint32(block.timestamp + 5 hours), 1e18 / 10);
+
+        InputSettlerBase.SolveParams[] memory solveParams = new InputSettlerBase.SolveParams[](1);
+        solveParams[0] =
+            InputSettlerBase.SolveParams({ solver: solver.toIdentifier(), timestamp: uint32(block.timestamp) });
+
+        // finalise first (AlwaysYesOracle attests anything) ...
+        vm.prank(solver);
+        IInputSettlerEscrow(inputSettlerEscrow).finalise(order, solveParams, solver.toIdentifier(), hex"");
+        assertEq(
+            uint8(InputSettlerEscrow(inputSettlerEscrow).orderStatus(orderId)),
+            uint8(InputSettlerEscrow.OrderStatus.Claimed)
+        );
+
+        // ... then the refund must revert.
+        vm.warp(fillDeadline + 1);
+        vm.expectRevert(InputSettlerEscrow.InvalidOrderStatus.selector);
+        IInputSettlerEscrow(inputSettlerEscrow).refundOnNonFill(order, 0);
+    }
+
+    function test_revert_finalise_after_refund_on_non_fill_one_shot() public {
+        uint32 fillDeadline = uint32(block.timestamp + 10 minutes);
+        (StandardOrder memory order, bytes32 orderId) =
+            _openOrderForNonFill(alwaysYesOracle, fillDeadline, uint32(block.timestamp + 5 hours), 1e18 / 10);
+
+        vm.warp(fillDeadline + 1);
+        IInputSettlerEscrow(inputSettlerEscrow).refundOnNonFill(order, 0);
+        assertEq(
+            uint8(InputSettlerEscrow(inputSettlerEscrow).orderStatus(orderId)),
+            uint8(InputSettlerEscrow.OrderStatus.Refunded)
+        );
+
+        // finalise after the refund must revert.
+        InputSettlerBase.SolveParams[] memory solveParams = new InputSettlerBase.SolveParams[](1);
+        solveParams[0] = InputSettlerBase.SolveParams({ solver: solver.toIdentifier(), timestamp: fillDeadline });
+        vm.prank(solver);
+        vm.expectRevert(InputSettlerEscrow.InvalidOrderStatus.selector);
+        IInputSettlerEscrow(inputSettlerEscrow).finalise(order, solveParams, solver.toIdentifier(), hex"");
+
+        // So must a second refund of either kind.
+        vm.expectRevert(InputSettlerEscrow.InvalidOrderStatus.selector);
+        IInputSettlerEscrow(inputSettlerEscrow).refundOnNonFill(order, 0);
+
+        vm.warp(order.expires + 1);
+        vm.expectRevert(InputSettlerEscrow.InvalidOrderStatus.selector);
+        InputSettlerEscrow(inputSettlerEscrow).refund(order);
+    }
+
     // -- Larger Integration tests -- //
 
     /// forge-config: default.isolate = true

@@ -53,17 +53,26 @@ contract PolymerOracle is BaseInputOracle {
         if (topics.length != 64) revert WrongEventSignature();
         // While it is unlikely an event matching the data pattern we have, validate the event signature.
         bytes32 eventSignature = bytes32(Bytes.slice(topics, 0, 32));
-        if (eventSignature != OutputSettlerBase.OutputFilled.selector) revert WrongEventSignature();
         // OrderId is topic[1] which is byte 32 to 64.
         bytes32 orderId = bytes32(Bytes.slice(topics, 32, 64));
 
-        (bytes32 solver, uint32 timestamp, MandateOutput memory output,) =
-            abi.decode(unindexedData, (bytes32, uint32, MandateOutput, uint256));
-
-        bytes32 payloadHash = _proofPayloadHash(orderId, solver, timestamp, output);
-
         // Convert the Polymer ChainID into the canonical chainId.
         uint256 remoteChainId = _getChainId(uint256(chainId));
+
+        bytes32 payloadHash;
+        if (eventSignature == OutputSettlerBase.OutputFilled.selector) {
+            (bytes32 solver, uint32 timestamp, MandateOutput memory output,) =
+                abi.decode(unindexedData, (bytes32, uint32, MandateOutput, uint256));
+
+            payloadHash = _proofPayloadHash(orderId, solver, timestamp, output);
+        } else if (eventSignature == OutputSettlerBase.OutputNotFilled.selector) {
+            (MandateOutput memory output, uint32 fillDeadline) = abi.decode(unindexedData, (MandateOutput, uint32));
+
+            payloadHash =
+                keccak256(MandateOutputEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, output));
+        } else {
+            revert WrongEventSignature();
+        }
 
         bytes32 application = emittingContract.toIdentifier();
         _attestations[remoteChainId][address(this).toIdentifier()][application][payloadHash] = true;

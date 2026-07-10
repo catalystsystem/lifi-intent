@@ -1,18 +1,18 @@
 {
   "bitcoinFinaliseDispute": "63461",
-  "bitcoinOPVerify": "88119",
+  "bitcoinOPVerify": "88137",
   "bitcoinOutputClaim": "99976",
   "bitcoinOutputDispute": "71910",
-  "bitcoinVerify": "135821",
-  "bitcoinVerifyWithEmbed": "138439",
+  "bitcoinVerify": "135839",
+  "bitcoinVerifyWithEmbed": "138457",
   "citreaFinaliseDispute": "63461",
-  "citreaOPVerify": "88119",
+  "citreaOPVerify": "88137",
   "citreaOutputClaim": "99976",
   "citreaOutputDispute": "71910",
-  "citreaVerify": "131077",
-  "citreaVerifyWithEmbed": "133695",
-  "hyperlaneOracleHandle": "50233",
-  "hyperlaneOracleSubmit": "67241",
-  "hyperlaneOracleSubmitCustomHook": "67617",
-  "wormholeOracleSubmit": "42417"
+  "citreaVerify": "131095",
+  "citreaVerifyWithEmbed": "133713",
+  "hyperlaneOracleHandle": "50281",
+  "hyperlaneOracleSubmit": "67472",
+  "hyperlaneOracleSubmitCustomHook": "67848",
+  "wormholeOracleSubmit": "42648"
 }

@@ -364,6 +364,32 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
         emit Refunded(orderId);
     }
 
+    /**
+     * @notice Refunds an order as soon as any one of its outputs is proven not filled before the order's fill
+     * deadline — without waiting for `order.expires`. The time-based `refund` remains available as the backstop.
+     * @dev Permissionless; the inputs always go to `order.user`. Safe because:
+     * - Fills are frozen after `order.fillDeadline`, so a proven non-fill is permanent.
+     * - The proof hash is reconstructed from the signed `order.fillDeadline` (committed inside `orderId`), so
+     *   attestations for fabricated deadlines are inert.
+     * - `_resolveLock` requires `Deposited` and flips it: this and `finalise` can never both settle the same order.
+     * - A single missing output suffices since `finalise` requires every output proven filled.
+     * @param order StandardOrder description of the intent.
+     * @param outputIndex Index of the output proven not filled.
+     */
+    function refundOnNonFill(
+        StandardOrder calldata order,
+        uint256 outputIndex
+    ) external virtual {
+        _validateInputChain(order.originChainId);
+        _validateTimestampHasPassed(order.fillDeadline);
+
+        bytes32 orderId = order.orderIdentifier();
+        _validateNonFill(order.fillDeadline, order.inputOracle, order.outputs[outputIndex], orderId);
+
+        _resolveLock(orderId, order.inputs, order.user, OrderStatus.Refunded);
+        emit Refunded(orderId);
+    }
+
     // --- Finalise Orders --- //
 
     /**

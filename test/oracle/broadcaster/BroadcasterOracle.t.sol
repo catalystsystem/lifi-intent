@@ -107,15 +107,18 @@ contract BroadcasterOracleTest is Test {
             context: bytes("")
         });
 
-        payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        // The recorded storage proof (broadcast_proof_block_9706376.json) was produced from a Sepolia broadcast of a
+        // legacy untagged fill description. The broadcaster transport is payload-agnostic — it only ever hashes the
+        // payload — so the fixture stays valid with the payload reproduced verbatim in its original untagged layout.
+        payload = abi.encodePacked(
             filler.toIdentifier(),
             keccak256(bytes("orderId")),
             uint32(1764104508),
             output.token,
             output.amount,
             output.recipient,
-            bytes(""),
-            bytes("")
+            uint16(0), // callbackData length
+            uint16(0) // context length
         );
 
         return (payload, broadcasterOracleSubmitter, outputSettler);

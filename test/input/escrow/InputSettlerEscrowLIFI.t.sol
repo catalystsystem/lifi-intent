@@ -202,4 +202,39 @@ contract inputSettlerEscrowTestBaseLIFI is InputSettlerEscrowTest {
         assertEq(token.balanceOf(solver), amountPostFee);
         assertEq(token.balanceOf(InputSettlerEscrowLIFI(inputSettlerEscrow).owner()), govFeeAmount);
     }
+
+    /// @dev The governance fee is waived on refunds: a failed intent returns the user's full inputs on both the
+    /// expiry-based refund and the proof-based refundOnNonFill, even with a fee configured.
+    function test_refunds_waive_governance_fee(
+        uint64 fee
+    ) public {
+        vm.assume(fee > 0 && fee <= MAX_GOVERNANCE_FEE);
+        vm.prank(owner);
+        InputSettlerEscrowLIFI(inputSettlerEscrow).setGovernanceFee(fee);
+        vm.warp(uint32(block.timestamp) + GOVERNANCE_FEE_CHANGE_DELAY + 1);
+        InputSettlerEscrowLIFI(inputSettlerEscrow).applyGovernanceFee();
+
+        uint128 amount = 1e18 / 10;
+
+        // Expiry-based refund.
+        uint32 fillDeadline = uint32(block.timestamp + 10 minutes);
+        (StandardOrder memory order,) =
+            _openOrderForNonFill(alwaysYesOracle, fillDeadline, uint32(block.timestamp + 5 hours), amount);
+        uint256 balanceBefore = token.balanceOf(swapper);
+        vm.warp(order.expires + 1);
+        InputSettlerEscrowLIFI(inputSettlerEscrow).refund(order);
+        assertEq(token.balanceOf(swapper), balanceBefore + amount, "expiry refund must be feeless");
+        assertEq(token.balanceOf(owner), 0);
+
+        // Proof-based quick refund. Timestamps derive from the warped-to time rather than re-reading
+        // block.timestamp, which via-IR may cache across vm.warp within the same test frame.
+        uint32 warpedTo = order.expires + 1;
+        fillDeadline = warpedTo + 10 minutes;
+        (order,) = _openOrderForNonFill(alwaysYesOracle, fillDeadline, warpedTo + 5 hours, amount);
+        balanceBefore = token.balanceOf(swapper);
+        vm.warp(fillDeadline + 1);
+        InputSettlerEscrowLIFI(inputSettlerEscrow).refundOnNonFill(order, 0);
+        assertEq(token.balanceOf(swapper), balanceBefore + amount, "non-fill refund must be feeless");
+        assertEq(token.balanceOf(owner), 0);
+    }
 }

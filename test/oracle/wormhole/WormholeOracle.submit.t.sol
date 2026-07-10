@@ -133,6 +133,7 @@ contract WormholeOracleTestSubmit is Test {
         uint64 val,
         bytes[] calldata payloads
     ) external {
+        _assumeTransportablePayloads(payloads);
         expectedValueOnCall = val;
         oracle.submit{ value: val }(address(this), payloads);
     }
@@ -141,11 +142,23 @@ contract WormholeOracleTestSubmit is Test {
         uint64 val,
         bytes[] calldata payloads
     ) external {
+        _assumeTransportablePayloads(payloads);
         revertFallback = true;
         expectedValueOnCall = val;
 
         if (val > 0) vm.expectRevert();
         oracle.submit{ value: val }(address(this), payloads);
+    }
+
+    /// @dev These tests target value refunds, not the message encoding: keep the fuzzed payloads within the
+    /// MessageEncodingLib transport bounds so encodeMessage cannot revert with TooLargePayload.
+    function _assumeTransportablePayloads(
+        bytes[] calldata payloads
+    ) internal pure {
+        vm.assume(payloads.length <= 64);
+        for (uint256 i; i < payloads.length; ++i) {
+            vm.assume(payloads[i].length < type(uint16).max);
+        }
     }
 
     function hasAttested(

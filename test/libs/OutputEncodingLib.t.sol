@@ -184,7 +184,7 @@ contract MandateOutputEncodingLibTest is Test {
         assertEq(encodedOutput, encodedOutputMemory);
         assertEq(
             encodedOutputFromOutput,
-            hex"1da5212527b611fa26a679f652ca82511b7def2f4c7af4d7bb6f175835f323dcaad60a3265e1c3c0dff4ef3474d6c608ca5f7ec61bd7dcbc5a992ad0576306911227958e9b9b0454cadcb5884dd3faa6ba975da4d2459aa3f11d31291a25a8358f84946d89c4783cb6cc307f98e95f2d5d5d8647bdb3d4bdd087209374f187b38e098895811085f5b5d1b29598e73ca51de3d712f5d3103ad50e22dc1f4d3ff1559d511500000000"
+            hex"d4f8baf11da5212527b611fa26a679f652ca82511b7def2f4c7af4d7bb6f175835f323dcaad60a3265e1c3c0dff4ef3474d6c608ca5f7ec61bd7dcbc5a992ad0576306911227958e9b9b0454cadcb5884dd3faa6ba975da4d2459aa3f11d31291a25a8358f84946d89c4783cb6cc307f98e95f2d5d5d8647bdb3d4bdd087209374f187b38e098895811085f5b5d1b29598e73ca51de3d712f5d3103ad50e22dc1f4d3ff1559d511500000000"
         );
 
         call = abi.encodePacked(keccak256(hex""), keccak256(hex"01"), bytes3(0x010203));
@@ -206,7 +206,7 @@ contract MandateOutputEncodingLibTest is Test {
         assertEq(encodedOutput, encodedOutputMemory);
         assertEq(
             encodedOutputFromOutput,
-            hex"1da5212527b611fa26a679f652ca82511b7def2f4c7af4d7bb6f175835f323dcaad60a3265e1c3c0dff4ef3474d6c608ca5f7ec61bd7dcbc5a992ad0576306911227958e9b9b0454cadcb5884dd3faa6ba975da4d2459aa3f11d31291a25a8358f84946d89c4783cb6cc307f98e95f2d5d5d8647bdb3d4bdd087209374f187b38e098895811085f5b5d1b29598e73ca51de3d712f5d3103ad50e22dc1f4d3ff1559d51150043c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a4705fe7f977e71dba2ea1a68e21057beebb9be2ac30c6410aa38d4f3fbe41dcffd20102030084f2ee15ea639b73fa3db9b34a245bdfa015c260c598b211bf05a1ecc4b3e3b4f269c322e3248a5dfc29d73c5b0553b0185a35cd5bb6386747517ef7e53b15e287f343681465b9efe82c933c3e8748c70cb8aa06539c361de20f72eac04e766393dbb8d0f4c497851a5043c6363657698cb1387682cac2f786c731f8936109d79501020304"
+            hex"d4f8baf11da5212527b611fa26a679f652ca82511b7def2f4c7af4d7bb6f175835f323dcaad60a3265e1c3c0dff4ef3474d6c608ca5f7ec61bd7dcbc5a992ad0576306911227958e9b9b0454cadcb5884dd3faa6ba975da4d2459aa3f11d31291a25a8358f84946d89c4783cb6cc307f98e95f2d5d5d8647bdb3d4bdd087209374f187b38e098895811085f5b5d1b29598e73ca51de3d712f5d3103ad50e22dc1f4d3ff1559d51150043c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a4705fe7f977e71dba2ea1a68e21057beebb9be2ac30c6410aa38d4f3fbe41dcffd20102030084f2ee15ea639b73fa3db9b34a245bdfa015c260c598b211bf05a1ecc4b3e3b4f269c322e3248a5dfc29d73c5b0553b0185a35cd5bb6386747517ef7e53b15e287f343681465b9efe82c933c3e8748c70cb8aa06539c361de20f72eac04e766393dbb8d0f4c497851a5043c6363657698cb1387682cac2f786c731f8936109d79501020304"
         );
     }
 
@@ -286,5 +286,162 @@ contract MandateOutputEncodingLibTest is Test {
         this.encodeFillDescriptionHarness(solver, orderId, timestamp, token, amount, recipient, call, context);
         vm.expectRevert(abi.encodeWithSignature("ContextOutOfRange()"));
         this.encodeFillDescriptionMemoryHarness(solver, orderId, timestamp, token, amount, recipient, call, context);
+    }
+
+    // --- NotFilledDescription --- //
+
+    function encodeNotFilledDescriptionHarness(
+        bytes32 orderId,
+        uint32 fillDeadline,
+        MandateOutput calldata output
+    ) external pure returns (bytes memory encodedOutput) {
+        return MandateOutputEncodingLib.encodeNotFilledDescription(orderId, fillDeadline, output);
+    }
+
+    function encodeNotFilledDescriptionMemoryHarness(
+        bytes32 orderId,
+        uint32 fillDeadline,
+        MandateOutput memory output
+    ) external pure returns (bytes memory encodedOutput) {
+        return MandateOutputEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, output);
+    }
+
+    function loadHarness(
+        bytes calldata payload
+    ) external pure returns (bytes32 solver, bytes32 orderId, uint32 timestamp) {
+        solver = MandateOutputEncodingLib.loadSolverFromFillDescription(payload);
+        orderId = MandateOutputEncodingLib.loadOrderIdFromFillDescription(payload);
+        timestamp = MandateOutputEncodingLib.loadTimestampFromFillDescription(payload);
+    }
+
+    function loadNotFilledHarness(
+        bytes calldata payload
+    ) external pure returns (bytes32 orderId, uint32 fillDeadline) {
+        orderId = MandateOutputEncodingLib.loadOrderIdFromNotFilledDescription(payload);
+        fillDeadline = MandateOutputEncodingLib.loadFillDeadlineFromNotFilledDescription(payload);
+    }
+
+    /// @dev The 4-byte magics are truncated keccak outputs; unlike the full 32-byte hashes their distinctness is not
+    /// self-evident, so pin both values (and thereby their distinctness) explicitly. A future tag addition must not
+    /// collide in the truncated space.
+    function test_domain_magics() external pure {
+        assertEq(MandateOutputEncodingLib.FILL_MAGIC, bytes4(0xd4f8baf1));
+        assertEq(MandateOutputEncodingLib.NOT_FILLED_MAGIC, bytes4(0x9ec328ad));
+        assertEq(MandateOutputEncodingLib.FILL_MAGIC, bytes4(keccak256("OIF.Fill.v1")));
+        assertEq(MandateOutputEncodingLib.NOT_FILLED_MAGIC, bytes4(keccak256("OIF.NotFilled.v1")));
+        assertTrue(MandateOutputEncodingLib.FILL_MAGIC != MandateOutputEncodingLib.NOT_FILLED_MAGIC);
+    }
+
+    function test_encodeNotFilledDescription() external view {
+        // The goal of this output is to fill all bytes such that no bytes are left empty.
+        // This allows for better comparison to other vm implementations incase something is wrong.
+        bytes32 orderId = keccak256(bytes("orderId"));
+        uint32 fillDeadline = uint32(uint256(keccak256(bytes("fillDeadline"))));
+
+        MandateOutput memory output = MandateOutput({
+            oracle: keccak256(bytes("outputOracle")),
+            settler: keccak256(bytes("outputSettler")),
+            chainId: uint256(keccak256(bytes("chainId"))),
+            token: keccak256(bytes("token")),
+            amount: uint256(keccak256(bytes("amount"))),
+            recipient: keccak256(bytes("recipient")),
+            callbackData: hex"",
+            context: hex""
+        });
+
+        bytes memory encodedOutput = this.encodeNotFilledDescriptionHarness(orderId, fillDeadline, output);
+        bytes memory encodedOutputMemory = this.encodeNotFilledDescriptionMemoryHarness(orderId, fillDeadline, output);
+        assertEq(encodedOutput, encodedOutputMemory);
+        assertEq(
+            encodedOutput,
+            hex"9ec328adaad60a3265e1c3c0dff4ef3474d6c608ca5f7ec61bd7dcbc5a992ad057630691c9757d059b9b0454cadcb5884dd3faa6ba975da4d2459aa3f11d31291a25a8358f84946d89c4783cb6cc307f98e95f2d5d5d8647bdb3d4bdd087209374f187b38e098895811085f5b5d1b29598e73ca51de3d712f5d3103ad50e22dc1f4d3ff1559d511500000000"
+        );
+
+        output.callbackData = abi.encodePacked(keccak256(hex""), keccak256(hex"01"), bytes3(0x010203));
+        output.context = abi.encodePacked(
+            keccak256(hex"02"), keccak256(hex"03"), keccak256(hex"04"), keccak256(hex"05"), bytes4(0x01020304)
+        );
+
+        encodedOutput = this.encodeNotFilledDescriptionHarness(orderId, fillDeadline, output);
+        encodedOutputMemory = this.encodeNotFilledDescriptionMemoryHarness(orderId, fillDeadline, output);
+        assertEq(encodedOutput, encodedOutputMemory);
+        assertEq(
+            encodedOutput,
+            hex"9ec328adaad60a3265e1c3c0dff4ef3474d6c608ca5f7ec61bd7dcbc5a992ad057630691c9757d059b9b0454cadcb5884dd3faa6ba975da4d2459aa3f11d31291a25a8358f84946d89c4783cb6cc307f98e95f2d5d5d8647bdb3d4bdd087209374f187b38e098895811085f5b5d1b29598e73ca51de3d712f5d3103ad50e22dc1f4d3ff1559d51150043c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a4705fe7f977e71dba2ea1a68e21057beebb9be2ac30c6410aa38d4f3fbe41dcffd20102030084f2ee15ea639b73fa3db9b34a245bdfa015c260c598b211bf05a1ecc4b3e3b4f269c322e3248a5dfc29d73c5b0553b0185a35cd5bb6386747517ef7e53b15e287f343681465b9efe82c933c3e8748c70cb8aa06539c361de20f72eac04e766393dbb8d0f4c497851a5043c6363657698cb1387682cac2f786c731f8936109d79501020304"
+        );
+    }
+
+    function test_revert_encodeNotFilledDescription_OutOfRange() external {
+        bytes32 orderId = keccak256(bytes("orderId"));
+        uint32 fillDeadline = uint32(uint256(keccak256(bytes("fillDeadline"))));
+
+        MandateOutput memory output = MandateOutput({
+            oracle: keccak256(bytes("outputOracle")),
+            settler: keccak256(bytes("outputSettler")),
+            chainId: uint256(keccak256(bytes("chainId"))),
+            token: keccak256(bytes("token")),
+            amount: uint256(keccak256(bytes("amount"))),
+            recipient: keccak256(bytes("recipient")),
+            callbackData: new bytes(65536),
+            context: new bytes(0)
+        });
+
+        vm.expectRevert(abi.encodeWithSignature("CallOutOfRange()"));
+        this.encodeNotFilledDescriptionHarness(orderId, fillDeadline, output);
+        vm.expectRevert(abi.encodeWithSignature("CallOutOfRange()"));
+        this.encodeNotFilledDescriptionMemoryHarness(orderId, fillDeadline, output);
+
+        output.callbackData = new bytes(0);
+        output.context = new bytes(65536);
+
+        vm.expectRevert(abi.encodeWithSignature("ContextOutOfRange()"));
+        this.encodeNotFilledDescriptionHarness(orderId, fillDeadline, output);
+        vm.expectRevert(abi.encodeWithSignature("ContextOutOfRange()"));
+        this.encodeNotFilledDescriptionMemoryHarness(orderId, fillDeadline, output);
+    }
+
+    /// forge-config: default.fuzz.runs = 1024
+    function test_fuzz_fill_and_notFilled_domains_never_collide(
+        bytes32 solver,
+        bytes32 orderId,
+        uint32 timestamp,
+        uint32 fillDeadline,
+        MandateOutput memory output
+    ) external view {
+        vm.assume(output.callbackData.length <= 1024 && output.context.length <= 1024);
+
+        bytes memory fill = this.encodeFillDescriptionMemoryHarness(solver, orderId, timestamp, output);
+        bytes memory notFilled = this.encodeNotFilledDescriptionMemoryHarness(orderId, fillDeadline, output);
+
+        // Each domain leads with its own magic, so the encodings (and thus their hashes, short of a keccak
+        // collision) can never be cross-consumed.
+        assertEq(bytes4(fill), MandateOutputEncodingLib.FILL_MAGIC);
+        assertEq(bytes4(notFilled), MandateOutputEncodingLib.NOT_FILLED_MAGIC);
+        assertTrue(keccak256(fill) != keccak256(notFilled));
+
+        assertEq(fill.length, 172 + output.callbackData.length + output.context.length);
+        assertEq(notFilled.length, 140 + output.callbackData.length + output.context.length);
+    }
+
+    /// forge-config: default.fuzz.runs = 1024
+    function test_fuzz_description_loaders_roundtrip(
+        bytes32 solver,
+        bytes32 orderId,
+        uint32 timestamp,
+        uint32 fillDeadline,
+        MandateOutput memory output
+    ) external view {
+        vm.assume(output.callbackData.length <= 1024 && output.context.length <= 1024);
+
+        bytes memory fill = this.encodeFillDescriptionMemoryHarness(solver, orderId, timestamp, output);
+        (bytes32 loadedSolver, bytes32 loadedOrderId, uint32 loadedTimestamp) = this.loadHarness(fill);
+        assertEq(loadedSolver, solver);
+        assertEq(loadedOrderId, orderId);
+        assertEq(loadedTimestamp, timestamp);
+
+        bytes memory notFilled = this.encodeNotFilledDescriptionMemoryHarness(orderId, fillDeadline, output);
+        (bytes32 loadedNotFilledOrderId, uint32 loadedFillDeadline) = this.loadNotFilledHarness(notFilled);
+        assertEq(loadedNotFilledOrderId, orderId);
+        assertEq(loadedFillDeadline, fillDeadline);
     }
 }

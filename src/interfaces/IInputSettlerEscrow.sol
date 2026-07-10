@@ -33,6 +33,15 @@ interface IInputSettlerEscrow {
         bytes calldata orderOwnerSignature
     ) external;
 
+    function refund(
+        StandardOrder calldata order
+    ) external;
+
+    function refundOnNonFill(
+        StandardOrder calldata order,
+        uint256 outputIndex
+    ) external;
+
     function orderIdentifier(
         StandardOrder memory order
     ) external view returns (bytes32);

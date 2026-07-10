@@ -288,4 +288,53 @@ contract PolymerOracleMappedTest is Test {
 
         assertEq(token.balanceOf(solver), amount);
     }
+
+    function test_receiveMessage_notFilled_proof_mapped() public {
+        bytes32 orderId = keccak256("orderId");
+        uint32 fillDeadline = uint32(block.timestamp);
+        uint32 remoteChainId = 1;
+
+        MandateOutput memory output = MandateOutput({
+            oracle: address(polymerOracleMapped).toIdentifier(),
+            settler: makeAddr("settler").toIdentifier(),
+            chainId: remoteChainId,
+            token: makeAddr("token").toIdentifier(),
+            amount: 1000000000000000000,
+            recipient: makeAddr("recipient").toIdentifier(),
+            callbackData: bytes(""),
+            context: bytes("")
+        });
+
+        vm.prank(owner);
+        polymerOracleMapped.setChainMap(remoteChainId, remoteChainId);
+
+        bytes32[] memory topics = new bytes32[](2);
+        topics[0] = OutputSettlerBase.OutputNotFilled.selector;
+        topics[1] = orderId;
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitProof(
+            remoteChainId, makeAddr("settler"), topics, abi.encode(output, fillDeadline)
+        );
+
+        bytes32 expectedPayloadHash =
+            keccak256(MandateOutputEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, output));
+
+        vm.expectEmit();
+        emit OutputProven(
+            remoteChainId,
+            address(polymerOracleMapped).toIdentifier(),
+            makeAddr("settler").toIdentifier(),
+            expectedPayloadHash
+        );
+        polymerOracleMapped.receiveMessage(mockProof);
+
+        assertTrue(
+            polymerOracleMapped.isProven(
+                remoteChainId,
+                address(polymerOracleMapped).toIdentifier(),
+                makeAddr("settler").toIdentifier(),
+                expectedPayloadHash
+            )
+        );
+    }
 }

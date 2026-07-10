@@ -174,6 +174,201 @@ contract PolymerOracleTest is Test {
         polymerOracle.receiveMessage(proofs);
     }
 
+    // --- OutputNotFilled --- //
+
+    function _notFilledOutput() internal returns (MandateOutput memory) {
+        return MandateOutput({
+            oracle: address(polymerOracle).toIdentifier(),
+            settler: makeAddr("settler").toIdentifier(),
+            chainId: 1,
+            token: makeAddr("token").toIdentifier(),
+            amount: 1000000000000000000,
+            recipient: makeAddr("recipient").toIdentifier(),
+            callbackData: bytes(""),
+            context: bytes("")
+        });
+    }
+
+    function test_receiveMessage_notFilled_proof() public {
+        bytes32 orderId = keccak256("orderId");
+        uint32 fillDeadline = uint32(block.timestamp);
+        MandateOutput memory output = _notFilledOutput();
+
+        bytes32[] memory topics = new bytes32[](2);
+        topics[0] = OutputSettlerBase.OutputNotFilled.selector;
+        topics[1] = orderId;
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitProof(
+            uint32(output.chainId), makeAddr("settler"), topics, abi.encode(output, fillDeadline)
+        );
+
+        bytes32 expectedPayloadHash =
+            keccak256(MandateOutputEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, output));
+
+        vm.expectEmit();
+        emit OutputProven(
+            output.chainId,
+            address(polymerOracle).toIdentifier(),
+            makeAddr("settler").toIdentifier(),
+            expectedPayloadHash
+        );
+        polymerOracle.receiveMessage(mockProof);
+
+        assertTrue(
+            polymerOracle.isProven(
+                output.chainId,
+                address(polymerOracle).toIdentifier(),
+                makeAddr("settler").toIdentifier(),
+                expectedPayloadHash
+            )
+        );
+    }
+
+
+
+
+    /// @dev End-to-end quick refund over the Polymer rail: open → deadline passes unfilled → emitNotFilled on the
+    /// output settler → prove the event → refundOnNonFill releases the escrow before order.expires. Also asserts
+    /// cross-consumption fails in both directions (NotProven).
+    function test_receiveMessage_notFilled_and_refundOnNonFill() public {
+        uint256 amount = 1e18 / 10;
+
+        MandateOutput[] memory outputs = new MandateOutput[](1);
+        outputs[0] = MandateOutput({
+            settler: address(outputSettler).toIdentifier(),
+            oracle: address(polymerOracle).toIdentifier(),
+            chainId: block.chainid,
+            token: address(anotherToken).toIdentifier(),
+            amount: amount,
+            recipient: swapper.toIdentifier(),
+            callbackData: hex"",
+            context: hex""
+        });
+        uint256[2][] memory inputs = new uint256[2][](1);
+        inputs[0] = [uint256(uint160(address(token))), amount];
+
+        uint32 fillDeadline = uint32(block.timestamp + 10 minutes);
+        StandardOrder memory order = StandardOrder({
+            user: swapper,
+            nonce: 0,
+            originChainId: block.chainid,
+            expires: uint32(block.timestamp + 5 hours),
+            fillDeadline: fillDeadline,
+            inputOracle: address(polymerOracle),
+            inputs: inputs,
+            outputs: outputs
+        });
+
+        // Deposit into the escrow.
+        vm.prank(swapper);
+        token.approve(inputSettlerEscrow, amount);
+        vm.prank(swapper);
+        IInputSettlerEscrow(inputSettlerEscrow).open(order);
+        assertEq(token.balanceOf(swapper), 1e18 - amount);
+
+        bytes32 orderId = IInputSettlerEscrow(inputSettlerEscrow).orderIdentifier(order);
+
+        // Nobody fills. The deadline passes.
+        vm.warp(fillDeadline + 1);
+
+        // Stage A: emit the attestable non-fill event on the output settler.
+        vm.expectEmit();
+        emit OutputSettlerBase.OutputNotFilled(orderId, outputs[0], fillDeadline);
+        outputSettler.emitNotFilled(orderId, outputs[0], fillDeadline);
+
+        // Stage B: prove the event through Polymer.
+        bytes32[] memory topics = new bytes32[](2);
+        topics[0] = OutputSettlerBase.OutputNotFilled.selector;
+        topics[1] = orderId;
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitProof(
+            uint32(block.chainid), address(outputSettler), topics, abi.encode(outputs[0], fillDeadline)
+        );
+
+        bytes32 payloadHash =
+            keccak256(MandateOutputEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, outputs[0]));
+        vm.expectEmit();
+        emit OutputProven(
+            block.chainid, address(polymerOracle).toIdentifier(), address(outputSettler).toIdentifier(), payloadHash
+        );
+        polymerOracle.receiveMessage(mockProof);
+
+        // Cross-consumption: the proven non-fill must not be usable to finalise.
+        InputSettlerBase.SolveParams[] memory solveParams = new InputSettlerBase.SolveParams[](1);
+        solveParams[0] = InputSettlerBase.SolveParams({ solver: solver.toIdentifier(), timestamp: fillDeadline });
+        vm.prank(solver);
+        vm.expectRevert(abi.encodeWithSignature("NotProven()"));
+        IInputSettlerEscrow(inputSettlerEscrow).finalise(order, solveParams, solver.toIdentifier(), hex"");
+
+        // Stage C: the refund consumes the proof and releases the escrow, well before order.expires.
+        vm.expectCall(
+            address(polymerOracle),
+            abi.encodeWithSignature(
+                "efficientRequireProven(bytes)",
+                abi.encodePacked(outputs[0].chainId, outputs[0].oracle, outputs[0].settler, payloadHash)
+            )
+        );
+        IInputSettlerEscrow(inputSettlerEscrow).refundOnNonFill(order, 0);
+
+        assertLt(block.timestamp, order.expires);
+        assertEq(token.balanceOf(swapper), 1e18);
+    }
+
+    /// @dev Cross-consumption in the other direction: a proven FILL must not be usable by refundOnNonFill.
+    function test_revert_refundOnNonFill_with_fill_proof() public {
+        uint256 amount = 1e18 / 10;
+
+        MandateOutput[] memory outputs = new MandateOutput[](1);
+        outputs[0] = MandateOutput({
+            settler: address(outputSettler).toIdentifier(),
+            oracle: address(polymerOracle).toIdentifier(),
+            chainId: block.chainid,
+            token: address(anotherToken).toIdentifier(),
+            amount: amount,
+            recipient: swapper.toIdentifier(),
+            callbackData: hex"",
+            context: hex""
+        });
+        uint256[2][] memory inputs = new uint256[2][](1);
+        inputs[0] = [uint256(uint160(address(token))), amount];
+
+        uint32 fillDeadline = uint32(block.timestamp + 10 minutes);
+        StandardOrder memory order = StandardOrder({
+            user: swapper,
+            nonce: 0,
+            originChainId: block.chainid,
+            expires: uint32(block.timestamp + 5 hours),
+            fillDeadline: fillDeadline,
+            inputOracle: address(polymerOracle),
+            inputs: inputs,
+            outputs: outputs
+        });
+
+        vm.prank(swapper);
+        token.approve(inputSettlerEscrow, amount);
+        vm.prank(swapper);
+        IInputSettlerEscrow(inputSettlerEscrow).open(order);
+
+        bytes32 orderId = IInputSettlerEscrow(inputSettlerEscrow).orderIdentifier(order);
+
+        // The output was filled before the deadline and the fill proven through Polymer.
+        uint32 fillTimestamp = uint32(block.timestamp);
+        bytes32[] memory topics = new bytes32[](2);
+        topics[0] = OutputSettlerBase.OutputFilled.selector;
+        topics[1] = orderId;
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitProof(
+            uint32(block.chainid),
+            address(outputSettler),
+            topics,
+            abi.encode(solver.toIdentifier(), fillTimestamp, outputs[0])
+        );
+        polymerOracle.receiveMessage(mockProof);
+
+        // The fill proof cannot be consumed as a non-fill.
+        vm.warp(fillDeadline + 1);
+        vm.expectRevert(abi.encodeWithSignature("NotProven()"));
+        IInputSettlerEscrow(inputSettlerEscrow).refundOnNonFill(order, 0);
+    }
+
     function test_receiveMessage_wrong_event_signature() public {
         bytes32 orderId = keccak256("orderId");
         bytes32[] memory topics = new bytes32[](2);

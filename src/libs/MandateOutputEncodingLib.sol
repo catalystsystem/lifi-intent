@@ -5,13 +5,19 @@ import { MandateOutput } from "../input/types/MandateOutputType.sol";
 
 /**
  * @notice Converts MandateOutputs to and from byte payloads.
- * @dev This library defines 2 payload encodings, one for internal usage and one for cross-chain communication.
+ * @dev This library defines 3 payload encodings, one for internal usage and two for cross-chain communication.
  * - MandateOutput serialisation of the exact output on a output chain (encodes the entirety MandateOutput struct). This
  * encoding may be used to obtain a collision free hash to uniquely identify a MandateOutput.
  * - FillDescription serialisation to describe describe what has been filled on a output chain. Its purpose is to
  * provide a source of truth of a output action.
+ * - NotFilledDescription serialisation to describe that an output was provably not filled before its fill deadline.
+ * Its purpose is to provide a source of truth of the permanent absence of a fill, enabling early refunds.
  * The encoding scheme uses 2 bytes long length identifiers. As a result, neither callbackData nor context exceed 65'535
  * bytes.
+ *
+ * Both proof payloads (FillDescription and NotFilledDescription) lead with a distinct 4-byte domain magic so consumers
+ * dispatch on the leading 4 bytes and the two proof domains can never be cross-consumed. The Serialised MandateOutput
+ * stays untagged: it is a purely internal identity key and is never ferried cross-chain.
  *
  * Serialised MandateOutput
  *      OUTPUT_ORACLE           0               (32 bytes)
@@ -20,12 +26,19 @@ import { MandateOutput } from "../input/types/MandateOutputType.sol";
  *      + COMMON_PAYLOAD        96
  *
  * Serialised FillDescription
- *      SOLVER                  0               (32 bytes)
- *      + ORDERID               32              (32 bytes)
- *      + TIMESTAMP             64              (4 bytes)
- *      + COMMON_PAYLOAD        68
+ *      FILL_MAGIC              0               (4 bytes)
+ *      + SOLVER                4               (32 bytes)
+ *      + ORDERID               36              (32 bytes)
+ *      + TIMESTAMP             68              (4 bytes)
+ *      + COMMON_PAYLOAD        72
  *
- * Common Payload. Is identical between both schemes
+ * Serialised NotFilledDescription
+ *      NOT_FILLED_MAGIC        0               (4 bytes)
+ *      + ORDERID               4               (32 bytes)
+ *      + FILL_DEADLINE         36              (4 bytes)
+ *      + COMMON_PAYLOAD        40
+ *
+ * Common Payload. Is identical between all schemes
  *      + TOKEN                 Y               (32 bytes)
  *      + AMOUNT                Y+32            (32 bytes)
  *      + RECIPIENT             Y+64            (32 bytes)
@@ -34,11 +47,23 @@ import { MandateOutput } from "../input/types/MandateOutputType.sol";
  *      + CONTEXT_LENGTH        Y+98+RC_LENGTH  (2 bytes)
  *      + CONTEXT               Y+100+RC_LENGTH (LENGTH bytes)
  *
- * where Y is the offset from the specific encoding (either 68 or 96)
+ * where Y is the offset from the specific encoding (40, 72 or 96)
  */
 library MandateOutputEncodingLib {
     error ContextOutOfRange();
     error CallOutOfRange();
+
+    /// @dev Domain magic leading every serialised FillDescription.
+    bytes4 internal constant FILL_MAGIC = bytes4(keccak256("OIF.Fill.v1"));
+    /// @dev Domain magic leading every serialised NotFilledDescription.
+    bytes4 internal constant NOT_FILLED_MAGIC = bytes4(keccak256("OIF.NotFilled.v1"));
+
+    /// @dev Minimum length of a serialised FillDescription: 4 + 32 + 32 + 4 + 100 (common payload with empty
+    /// call/context).
+    uint256 internal constant FILL_DESCRIPTION_MIN_LENGTH = 172;
+    /// @dev Minimum length of a serialised NotFilledDescription: 4 + 32 + 4 + 100 (common payload with empty
+    /// call/context).
+    uint256 internal constant NOT_FILLED_DESCRIPTION_MIN_LENGTH = 140;
 
     // --- MandateOutput --- //
 
@@ -146,6 +171,7 @@ library MandateOutputEncodingLib {
         if (context.length > type(uint16).max) revert ContextOutOfRange();
 
         return encodedOutput = abi.encodePacked(
+            FILL_MAGIC,
             solver,
             orderId,
             timestamp,
@@ -176,6 +202,7 @@ library MandateOutputEncodingLib {
         if (context.length > type(uint16).max) revert ContextOutOfRange();
 
         return encodedOutput = abi.encodePacked(
+            FILL_MAGIC,
             solver,
             orderId,
             timestamp,
@@ -228,6 +255,66 @@ library MandateOutputEncodingLib {
         );
     }
 
+    // --- NotFilledDescription Encoding --- //
+
+    /**
+     * @notice NotFilledDescription encoding. Attests that the output was not (and can never be) filled for the given
+     * order before fillDeadline.
+     * @dev Packed symmetrically with the FillDescription: MAGIC | headers | commonPayload. The common payload is
+     * carried (rather than an output hash) so consumers reconstruct the output identity exactly like they do for
+     * fills, and nothing output-chain-specific crosses the proof rail.
+     */
+    function encodeNotFilledDescription(
+        bytes32 orderId,
+        uint32 fillDeadline,
+        MandateOutput calldata mandateOutput
+    ) internal pure returns (bytes memory encodedOutput) {
+        bytes calldata callbackData = mandateOutput.callbackData;
+        bytes calldata context = mandateOutput.context;
+        if (callbackData.length > type(uint16).max) revert CallOutOfRange();
+        if (context.length > type(uint16).max) revert ContextOutOfRange();
+
+        return encodedOutput = abi.encodePacked(
+            NOT_FILLED_MAGIC,
+            orderId,
+            fillDeadline,
+            mandateOutput.token,
+            mandateOutput.amount,
+            mandateOutput.recipient,
+            uint16(callbackData.length), // To protect against data collisions
+            callbackData,
+            uint16(context.length), // To protect against data collisions
+            context
+        );
+    }
+
+    /**
+     * @notice Memory version of encodeNotFilledDescription
+     */
+    function encodeNotFilledDescriptionMemory(
+        bytes32 orderId,
+        uint32 fillDeadline,
+        MandateOutput memory mandateOutput
+    ) internal pure returns (bytes memory encodedOutput) {
+        bytes memory callbackData = mandateOutput.callbackData;
+        bytes memory context = mandateOutput.context;
+        if (callbackData.length > type(uint16).max) revert CallOutOfRange();
+        if (context.length > type(uint16).max) revert ContextOutOfRange();
+
+        return encodedOutput = abi.encodePacked(
+            NOT_FILLED_MAGIC,
+            orderId,
+            fillDeadline,
+            mandateOutput.token,
+            mandateOutput.amount,
+            mandateOutput.recipient,
+            uint16(callbackData.length), // To protect against data collisions
+            callbackData,
+            uint16(context.length), // To protect against data collisions
+            context
+        );
+    }
+
     // --- FillDescription Decoding --- //
 
     /**
@@ -239,7 +326,7 @@ library MandateOutputEncodingLib {
         bytes calldata fillDescription
     ) internal pure returns (bytes32 solver) {
         assembly ("memory-safe") {
-            solver := calldataload(fillDescription.offset)
+            solver := calldataload(add(fillDescription.offset, 0x04))
         }
     }
 
@@ -252,7 +339,7 @@ library MandateOutputEncodingLib {
         bytes calldata fillDescription
     ) internal pure returns (bytes32 orderId) {
         assembly ("memory-safe") {
-            orderId := calldataload(add(fillDescription.offset, 0x20))
+            orderId := calldataload(add(fillDescription.offset, 0x24))
         }
     }
 
@@ -266,7 +353,36 @@ library MandateOutputEncodingLib {
     ) internal pure returns (uint32 ts) {
         assembly ("memory-safe") {
             // Clean the leftmost bytes: (32-4)*8 = 224
-            ts := shr(224, shl(224, calldataload(add(fillDescription.offset, 0x24))))
+            ts := shr(224, shl(224, calldataload(add(fillDescription.offset, 0x28))))
+        }
+    }
+
+    // --- NotFilledDescription Decoding --- //
+
+    /**
+     * @notice Loads the orderId from a serialised not-filled description.
+     * @param notFilledDescription Serialised not-filled description.
+     * @return orderId associated with the output.
+     */
+    function loadOrderIdFromNotFilledDescription(
+        bytes calldata notFilledDescription
+    ) internal pure returns (bytes32 orderId) {
+        assembly ("memory-safe") {
+            orderId := calldataload(add(notFilledDescription.offset, 0x04))
+        }
+    }
+
+    /**
+     * @notice Loads the fill deadline from a serialised not-filled description.
+     * @param notFilledDescription Serialised not-filled description.
+     * @return fillDeadline The fill deadline the non-fill was attested against.
+     */
+    function loadFillDeadlineFromNotFilledDescription(
+        bytes calldata notFilledDescription
+    ) internal pure returns (uint32 fillDeadline) {
+        assembly ("memory-safe") {
+            // Clean the leftmost bytes: (32-4)*8 = 224
+            fillDeadline := shr(224, shl(224, calldataload(add(notFilledDescription.offset, 0x08))))
         }
     }
 }

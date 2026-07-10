@@ -203,6 +203,8 @@ contract InputSettlerEscrowLIFI is InputSettlerEscrow, GovernanceFee {
     /**
      * @dev This function employs a local reentry guard: we check the order status and then we update it afterwards.
      * This is an important check as it is intended to process external ERC20 transfers.
+     * The governance fee is waived on refunds — a failed intent returns the user's full inputs, on both the
+     * expiry-based `refund` and the proof-based `refundOnNonFill` paths.
      * @param newStatus specifies the new status to set the order to. Should never be OrderStatus.Deposited.
      */
     function _resolveLock(
@@ -218,7 +220,7 @@ contract InputSettlerEscrowLIFI is InputSettlerEscrow, GovernanceFee {
         orderStatus[orderId] = newStatus;
 
         address _owner = owner();
-        uint64 fee = _owner != address(0) ? governanceFee : 0;
+        uint64 fee = (_owner != address(0) && newStatus != OrderStatus.Refunded) ? governanceFee : 0;
         // We have now ensured that this point can only be reached once. We can now process the asset delivery.
         uint256 numInputs = inputs.length;
         for (uint256 i; i < numInputs; ++i) {

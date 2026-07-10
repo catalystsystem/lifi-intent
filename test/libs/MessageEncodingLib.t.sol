@@ -49,9 +49,10 @@ contract MessageEncodingLibTest is Test {
         bytes32 application,
         bytes[] calldata payloads
     ) external view {
-        vm.assume(payloads.length < type(uint16).max);
+        // Bounded to keep the quadratic encodePacked accumulation inside the memory limit.
+        vm.assume(payloads.length <= 256);
         for (uint256 i; i < payloads.length; ++i) {
-            vm.assume(payloads[i].length < type(uint16).max);
+            vm.assume(payloads[i].length <= 2048);
         }
 
         bytes memory encodedPayloads = MessageEncodingLib.encodeMessage(application, payloads);
