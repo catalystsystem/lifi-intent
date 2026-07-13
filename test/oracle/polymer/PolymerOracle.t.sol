@@ -77,7 +77,7 @@ contract PolymerOracleTest is Test {
         topics[1] = orderId;
 
         MandateOutput memory mandateOutput = MandateOutput({
-            oracle: makeAddr("oracle").toIdentifier(),
+            oracle: address(polymerOracle).toIdentifier(),
             settler: makeAddr("settler").toIdentifier(),
             chainId: 1,
             token: makeAddr("token").toIdentifier(),
@@ -119,7 +119,7 @@ contract PolymerOracleTest is Test {
         topics[1] = orderId1;
 
         MandateOutput memory mandateOutput = MandateOutput({
-            oracle: makeAddr("oracle").toIdentifier(),
+            oracle: address(polymerOracle).toIdentifier(),
             settler: makeAddr("settler").toIdentifier(),
             chainId: 1,
             token: makeAddr("token").toIdentifier(),
@@ -224,8 +224,46 @@ contract PolymerOracleTest is Test {
         );
     }
 
+    /// @dev The oracle in the proven event must be this PolymerOracle (same address on all chains). Otherwise
+    /// `emitNotFilled`'s fill-record check may have run under a different oracle key than the attestation is stored
+    /// under, letting a filled output (oracle A) be replayed as not-filled with oracle B.
+    function test_revert_receiveMessage_wrong_oracle() public {
+        bytes32 orderId = keccak256("orderId");
+        uint32 fillDeadline = uint32(block.timestamp);
+        MandateOutput memory output = _notFilledOutput();
+        output.oracle = makeAddr("otherOracle").toIdentifier();
 
+        bytes32[] memory topics = new bytes32[](2);
+        topics[0] = OutputSettlerBase.OutputNotFilled.selector;
+        topics[1] = orderId;
 
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitProof(
+            uint32(output.chainId), makeAddr("settler"), topics, abi.encode(output, fillDeadline)
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "WrongOutputOracle(bytes32,bytes32)", address(polymerOracle).toIdentifier(), output.oracle
+            )
+        );
+        polymerOracle.receiveMessage(mockProof);
+
+        // Same guard on the fill branch.
+        topics[0] = OutputSettlerBase.OutputFilled.selector;
+        bytes memory fillProof = mockCrossL2ProverV2.generateAndEmitProof(
+            uint32(output.chainId),
+            makeAddr("settler"),
+            topics,
+            abi.encode(solver.toIdentifier(), uint32(block.timestamp), output)
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "WrongOutputOracle(bytes32,bytes32)", address(polymerOracle).toIdentifier(), output.oracle
+            )
+        );
+        polymerOracle.receiveMessage(fillProof);
+    }
 
     /// @dev End-to-end quick refund over the Polymer rail: open → deadline passes unfilled → emitNotFilled on the
     /// output settler → prove the event → refundOnNonFill releases the escrow before order.expires. Also asserts

@@ -84,7 +84,7 @@ contract PolymerOracleMappedTest is Test {
         topics[1] = orderId;
 
         MandateOutput memory mandateOutput = MandateOutput({
-            oracle: makeAddr("oracle").toIdentifier(),
+            oracle: address(polymerOracleMapped).toIdentifier(),
             settler: makeAddr("settler").toIdentifier(),
             chainId: 1,
             token: makeAddr("token").toIdentifier(),
@@ -129,7 +129,7 @@ contract PolymerOracleMappedTest is Test {
         topics[1] = orderId1;
 
         MandateOutput memory mandateOutput = MandateOutput({
-            oracle: makeAddr("oracle").toIdentifier(),
+            oracle: address(polymerOracleMapped).toIdentifier(),
             settler: makeAddr("settler").toIdentifier(),
             chainId: 1,
             token: makeAddr("token").toIdentifier(),

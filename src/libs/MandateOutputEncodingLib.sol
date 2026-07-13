@@ -54,9 +54,9 @@ library MandateOutputEncodingLib {
     error CallOutOfRange();
 
     /// @dev Domain magic leading every serialised FillDescription.
-    bytes4 internal constant FILL_MAGIC = bytes4(keccak256("OIF.Fill.v1"));
+    bytes4 internal constant FILL_MAGIC = bytes4(keccak256("OIF.Fill"));
     /// @dev Domain magic leading every serialised NotFilledDescription.
-    bytes4 internal constant NOT_FILLED_MAGIC = bytes4(keccak256("OIF.NotFilled.v1"));
+    bytes4 internal constant NOT_FILLED_MAGIC = bytes4(keccak256("OIF.NotFilled"));
 
     /// @dev Minimum length of a serialised FillDescription: 4 + 32 + 32 + 4 + 100 (common payload with empty
     /// call/context).

@@ -300,10 +300,11 @@ contract OutputSettlerBaseNotFilledTest is Test {
         // A fill payload with the non-fill magic spliced in front of the fill headers parses as a (nonsense)
         // non-fill for a different output identity — it must not validate as anything.
         bytes memory spliced = fillPayload;
-        spliced[0] = bytes1(0x9e);
-        spliced[1] = bytes1(0xc3);
-        spliced[2] = bytes1(0x28);
-        spliced[3] = bytes1(0xad);
+        bytes4 notFilledMagic = MandateOutputEncodingLib.NOT_FILLED_MAGIC;
+        spliced[0] = notFilledMagic[0];
+        spliced[1] = notFilledMagic[1];
+        spliced[2] = notFilledMagic[2];
+        spliced[3] = notFilledMagic[3];
         assertFalse(_hasAttested(spliced));
     }
 

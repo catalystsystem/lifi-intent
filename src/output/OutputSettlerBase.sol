@@ -102,11 +102,10 @@ abstract contract OutputSettlerBase is IAttester, BaseInputOracle {
 
     /**
      * @notice Emitted when an output is attested as not filled before its fill deadline. Only needed by event-coupled
-     * oracles (Polymer); push oracles validate non-fills live through `hasAttested`.
-     * @dev The emitting guards make this event trustworthy: it is only emitted past `fillDeadline` for an output of
-     * this settler on this chain with no fill record. Note that `fillDeadline` is caller-supplied — a fabricated
-     * deadline yields a payload hash the signed order never references, so it cannot be consumed. Reorg protection
-     * is shared between oracles & this contract:
+     * oracles; push oracles validate non-fills live through `hasAttested`.
+     * @dev `fillDeadline` is caller-supplied; indexing on orderId & output cannot be trusted as is. `fillDeadline`
+     * has to be validated to match the original order.
+     * Reorg protection is shared between oracles & this contract:
      * - If a reorg inserts a fill() before emitNotFilled(), then emitNotFilled() would fail and not emit.
      * - If a reorg inserts a fill() after emitNotFilled(), then fill() would fail with FillDeadline.
      */
@@ -305,12 +304,10 @@ abstract contract OutputSettlerBase is IAttester, BaseInputOracle {
      * oracles (Polymer). Push oracles do not need this: their `submit` path validates non-fills live through
      * `hasAttested`.
      * @dev Permissionless and emit-only — this function NEVER writes `_fillRecords` (or any storage), so `fill()` is
-     * completely unaffected by it. Writing a marker instead would let anyone block legitimate fills with a fabricated
-     * early deadline. Duplicate emits are harmless.
-     * A fabricated `fillDeadline` produces a payload hash the signed order never references: the input settler
-     * reconstructs the hash from the signed `order.fillDeadline`, so such an attestation is inert.
-     * **This event cannot be trusted as is**. The fillDeadline absolutely has to be validated to
-     * match the original order.
+     * completely unaffected by it. Writing a marker would let anyone block legitimate fills with a fabricated early
+     * deadline. Duplicate emits are harmless.
+     * A fabricated `fillDeadline` produces a payload hash the signed order never references: input settlers
+     * must reconstructs the hash from the signed `order.fillDeadline`, so such an attestation is inert.
      * @param orderId The unique identifier of the order.
      * @param output The `MandateOutput` that was not filled. Must target this settler on this chain.
      * @param fillDeadline The fill deadline of the order. `block.timestamp` must exceed it. Must exactly match order of orderId.
@@ -339,8 +336,8 @@ abstract contract OutputSettlerBase is IAttester, BaseInputOracle {
      * cross-consumed. Payloads without a known magic revert; there is no untagged-payload fallback.
      * - Fill: every byte of the payload is checked against the stored fill record.
      * - Not filled: validated live against current state — no fill record exists and the deadline has passed.
-     *   Because fills are frozen after the deadline, this fact is permanent once true. Reorg protection is the
-     *   proving oracle's finality rule, not this contract's clock.
+     *   Because fills are frozen after the deadline, this fact is permanent once true. Reorg protection comes from
+     *   the proving oracle's finality rule.
      * @param payload The full proof payload to validate.
      * @return bool Whether or not the payload is attested to by this settler.
      */

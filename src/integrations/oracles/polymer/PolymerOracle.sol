@@ -6,6 +6,7 @@ import { Bytes } from "openzeppelin/utils/Bytes.sol";
 
 import { MandateOutput, MandateOutputEncodingLib } from "../../../libs/MandateOutputEncodingLib.sol";
 
+import { OutputVerificationLib } from "../../../libs/OutputVerificationLib.sol";
 import { BaseInputOracle } from "../../../oracles/BaseInputOracle.sol";
 import { OutputSettlerBase } from "../../../output/OutputSettlerBase.sol";
 import { ICrossL2ProverV2 } from "./external/interfaces/ICrossL2ProverV2.sol";
@@ -63,10 +64,12 @@ contract PolymerOracle is BaseInputOracle {
         if (eventSignature == OutputSettlerBase.OutputFilled.selector) {
             (bytes32 solver, uint32 timestamp, MandateOutput memory output,) =
                 abi.decode(unindexedData, (bytes32, uint32, MandateOutput, uint256));
+            OutputVerificationLib._isThisOutputOracle(output.oracle);
 
             payloadHash = _proofPayloadHash(orderId, solver, timestamp, output);
         } else if (eventSignature == OutputSettlerBase.OutputNotFilled.selector) {
             (MandateOutput memory output, uint32 fillDeadline) = abi.decode(unindexedData, (MandateOutput, uint32));
+            OutputVerificationLib._isThisOutputOracle(output.oracle);
 
             payloadHash =
                 keccak256(MandateOutputEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, output));
