@@ -22,6 +22,16 @@ fs_permissions = [
 src = "src"
 out = "out"
 libs = ["lib"]
+# the-compact pins pragma =0.8.30, which the Tron solc cannot satisfy; the Tron
+# deploy (script/tron/deploy-oif.ts) never uses the compact settler, so skip it
+# and its dependents (mirrors the --skip flags documented in deploy-oif.ts).
+skip = [
+    "**/the-compact/**",
+    "**/InputSettlerCompact*",
+    "**/RegisterIntent*",
+    "test/**",
+    "script/*.s.sol",
+]
 via_ir = true
 solc_version = "0.8.35"
 evm_version = "cancun"
