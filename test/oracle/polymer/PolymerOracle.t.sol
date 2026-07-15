@@ -4,6 +4,7 @@ pragma solidity ^0.8.22;
 
 import { Test } from "forge-std/Test.sol";
 
+import { Base64 } from "openzeppelin/utils/Base64.sol";
 import { MandateOutput } from "src/input/types/MandateOutputType.sol";
 import { PolymerOracle } from "src/integrations/oracles/polymer/PolymerOracle.sol";
 import { MockCrossL2ProverV2 } from "src/integrations/oracles/polymer/external/mocks/MockCrossL2ProverV2.sol";
@@ -498,5 +499,106 @@ contract PolymerOracleTest is Test {
         IInputSettlerEscrow(inputSettlerEscrow).finalise(order, solveParams, solver.toIdentifier(), hex"");
 
         assertEq(token.balanceOf(solver), amount);
+    }
+
+    /// ************** Solana Processing ************** ///
+
+    /// @dev Builds a Solana log in the real Polymer format: `"program: <base58>, <base64 blob>"`, where the decoded
+    ///      blob is layout (a) `application(32) || payload(dynamic)`.
+    function _encodeSolanaLog(
+        bytes32 programId,
+        bytes32 application,
+        bytes memory payload
+    ) internal view returns (string memory) {
+        return mockCrossL2ProverV2.formatSolLogMessage(programId, abi.encodePacked(application, payload));
+    }
+
+    function test_receiveSolanaMessage_with_proof() public {
+        uint32 solanaChainId = 2; // base variant uses identity chain mapping.
+        bytes32 programID = keccak256("solana-program");
+        bytes32 application = makeAddr("settler").toIdentifier();
+        bytes memory payload = bytes("test-payload");
+        bytes32 payloadHash = keccak256(payload);
+
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = _encodeSolanaLog(programID, application, payload);
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
+
+        // Sender identity is the authenticated program id.
+        vm.expectEmit();
+        emit OutputProven(uint256(solanaChainId), programID, application, payloadHash);
+        polymerOracle.receiveSolanaMessage(mockProof);
+
+        assertTrue(polymerOracle.isProven(uint256(solanaChainId), programID, application, payloadHash));
+    }
+
+    /// @dev CRITICAL regression on the base variant: an attacker program's forged log lands under the attacker's own
+    ///      program id and cannot forge an attestation for a victim's trusted oracle identity.
+    function test_receiveSolanaMessage_forged_program_self_namespaces() public {
+        uint32 solanaChainId = 2;
+        bytes32 victimProgramID = keccak256("victim-solana-program");
+        bytes32 attackerProgramID = keccak256("attacker-solana-program");
+        bytes32 application = makeAddr("settler").toIdentifier();
+        bytes memory payload = bytes("release-funds");
+        bytes32 payloadHash = keccak256(payload);
+
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = _encodeSolanaLog(victimProgramID, application, payload);
+
+        bytes memory mockProof =
+            mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, attackerProgramID, logMessages);
+
+        vm.expectEmit();
+        emit OutputProven(uint256(solanaChainId), attackerProgramID, application, payloadHash);
+        polymerOracle.receiveSolanaMessage(mockProof);
+
+        assertFalse(polymerOracle.isProven(uint256(solanaChainId), victimProgramID, application, payloadHash));
+        assertTrue(polymerOracle.isProven(uint256(solanaChainId), attackerProgramID, application, payloadHash));
+    }
+
+    function test_receiveSolanaMessage_wrong_chain_id_reverts() public {
+        uint32 wrongChainId = 1; // Not Solana (should be 2)
+        bytes32 programID = keccak256("solana-program");
+        bytes32 application = makeAddr("settler").toIdentifier();
+        bytes memory payload = bytes("test-payload");
+
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = _encodeSolanaLog(programID, application, payload);
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(wrongChainId, programID, logMessages);
+
+        vm.expectRevert(PolymerOracle.NotSolanaMessage.selector);
+        polymerOracle.receiveSolanaMessage(mockProof);
+    }
+
+    function test_receiveSolanaMessage_malformed_log_missing_delimiter_reverts() public {
+        uint32 solanaChainId = 2;
+        bytes32 programID = keccak256("solana-program");
+        bytes32 application = makeAddr("settler").toIdentifier();
+        bytes memory payload = bytes("test-payload");
+
+        // Raw base64 blob with no `"program: ..., "` wrapper: no `", "` delimiter.
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = Base64.encode(abi.encodePacked(application, payload));
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
+
+        vm.expectRevert(PolymerOracle.MalformedSolanaLog.selector);
+        polymerOracle.receiveSolanaMessage(mockProof);
+    }
+
+    function test_receiveSolanaMessage_invalid_solana_message_reverts() public {
+        uint32 solanaChainId = 2;
+        bytes32 programID = keccak256("solana-program");
+
+        // Decoded blob shorter than the required application(32) field.
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = mockCrossL2ProverV2.formatSolLogMessage(programID, abi.encodePacked(bytes4(0xdeadbeef)));
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
+
+        vm.expectRevert(PolymerOracle.InvalidSolanaMessage.selector);
+        polymerOracle.receiveSolanaMessage(mockProof);
     }
 }
