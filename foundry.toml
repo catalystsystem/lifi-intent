@@ -9,7 +9,11 @@ optimizer = true
 optimizer_runs = 100_000_000
 bytecode_hash = 'none'
 fuzz.runs = 10_000
-fs_permissions = [{ access = "read-write", path = "./script/wormhole.json" }, { access = "read-write", path = "./script/polymer.json" }]
+fs_permissions = [
+    { access = "read-write", path = "./script/wormhole.json" },
+    { access = "read-write", path = "./script/polymer.json" },
+    { access = "read", path = "./test/oracle/broadcaster/payloads/ethereum-sepolia" },
+]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
 
@@ -18,6 +22,16 @@ fs_permissions = [{ access = "read-write", path = "./script/wormhole.json" }, { 
 src = "src"
 out = "out"
 libs = ["lib"]
+# the-compact pins pragma =0.8.30, which the Tron solc cannot satisfy; the Tron
+# deploy (script/tron/deploy-oif.ts) never uses the compact settler, so skip it
+# and its dependents (mirrors the --skip flags documented in deploy-oif.ts).
+skip = [
+    "**/the-compact/**",
+    "**/InputSettlerCompact*",
+    "**/RegisterIntent*",
+    "test/**",
+    "script/*.s.sol",
+]
 via_ir = true
 solc_version = "0.8.35"
 evm_version = "cancun"

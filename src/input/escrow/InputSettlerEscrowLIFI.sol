@@ -238,7 +238,7 @@ contract InputSettlerEscrowLIFI is InputSettlerEscrow, GovernanceFee {
         }
     }
 
-    function _transfer(address token, address to, uint256 amount) internal virtual {
+    function _transfer(address token, address to, uint256 amount) internal virtual override {
         SafeTransferLib.safeTransfer(token, to, amount);
     }
 }

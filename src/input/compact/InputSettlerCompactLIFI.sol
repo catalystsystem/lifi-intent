@@ -142,6 +142,17 @@ contract InputSettlerCompactLIFI is InputSettlerCompact, GovernanceFee {
         bytes calldata allocatorData,
         bytes32 claimant
     ) internal override {
+        {
+            bytes32 orderId = _orderIdentifier(order);
+            // Check the order status:
+            OrderStatus status = orderStatus[orderId];
+            // Mark order as deposited. If we can't make the deposit, we will
+            // revert and it will unmark it. This acts as a reentry check.
+            if (status != OrderStatus.None) revert AlreadyClaimed();
+
+            orderStatus[orderId] = OrderStatus.Claimed;
+        }
+
         BatchClaimComponent[] memory batchClaimComponents;
         {
             uint256 numInputs = order.inputs.length;

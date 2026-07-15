@@ -21,3 +21,6 @@ bun.lock
 
 # Coverage files
 lcov.info
+
+# Cursor
+.cursorrules
