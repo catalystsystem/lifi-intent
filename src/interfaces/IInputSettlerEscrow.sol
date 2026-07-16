@@ -33,10 +33,21 @@ interface IInputSettlerEscrow {
         bytes calldata orderOwnerSignature
     ) external;
 
+    /**
+     * @notice Refunds an order that has not been finalised before it expired. This order may have been filled but
+     * finalise has not been called yet.
+     * @param order StandardOrder description of the intent.
+     */
     function refund(
         StandardOrder calldata order
     ) external;
 
+    /**
+     * @notice Refunds an order as soon as any one of its outputs is proven not filled before the order's fill
+     * deadline — without waiting for `order.expires`. The time-based `refund` remains available as the backstop.
+     * @param order StandardOrder description of the intent.
+     * @param outputIndex Index of the output proven not filled.
+     */
     function refundOnNonFill(
         StandardOrder calldata order,
         uint256 outputIndex

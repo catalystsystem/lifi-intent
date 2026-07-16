@@ -306,6 +306,25 @@ contract OutputSettlerBaseNotFilledTest is Test {
         spliced[2] = notFilledMagic[2];
         spliced[3] = notFilledMagic[3];
         assertFalse(_hasAttested(spliced));
+
+        // Reverse direction: a valid non-fill payload (a never-filled output past its deadline) with the FILL magic
+        // spliced in front parses as a (nonsense) fill for a different output identity — it must not validate either.
+        vm.warp(uint256(fillDeadline) + 1);
+        bytes32 unfilledOrderId = keccak256(bytes("unfilledOrderId"));
+        MandateOutput memory unfilledOutput = _output();
+        // Pad the common payload so the non-fill reaches the fill minimum length; otherwise the spliced fill payload
+        // is rejected as PayloadTooSmall before any record comparison, masking the domain check.
+        unfilledOutput.context = new bytes(32);
+        bytes memory notFilledPayload = _notFilledPayload(unfilledOrderId, fillDeadline, unfilledOutput);
+        assertTrue(_hasAttested(notFilledPayload));
+
+        bytes memory splicedFill = notFilledPayload;
+        bytes4 fillMagic = MandateOutputEncodingLib.FILL_MAGIC;
+        splicedFill[0] = fillMagic[0];
+        splicedFill[1] = fillMagic[1];
+        splicedFill[2] = fillMagic[2];
+        splicedFill[3] = fillMagic[3];
+        assertFalse(_hasAttested(splicedFill));
     }
 
 }

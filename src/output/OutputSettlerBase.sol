@@ -354,7 +354,7 @@ abstract contract OutputSettlerBase is IAttester, BaseInputOracle {
                 bytes32(uint256(uint160(msg.sender))), // Oracle
                 bytes32(uint256(uint160(address(this)))), // Settler
                 block.chainid,
-                payload[72:]
+                payload[MandateOutputEncodingLib.FILL_COMMON_PAYLOAD_OFFSET:]
             );
             bytes32 payloadOrderId = MandateOutputEncodingLib.loadOrderIdFromFillDescription(payload);
             bytes32 fillRecord = _fillRecords[payloadOrderId][outputHash];
@@ -374,7 +374,7 @@ abstract contract OutputSettlerBase is IAttester, BaseInputOracle {
                 bytes32(uint256(uint160(msg.sender))), // Oracle
                 bytes32(uint256(uint160(address(this)))), // Settler
                 block.chainid,
-                payload[40:]
+                payload[MandateOutputEncodingLib.NOT_FILLED_COMMON_PAYLOAD_OFFSET:]
             );
             bytes32 payloadOrderId = MandateOutputEncodingLib.loadOrderIdFromNotFilledDescription(payload);
             uint32 payloadFillDeadline = MandateOutputEncodingLib.loadFillDeadlineFromNotFilledDescription(payload);

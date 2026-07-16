@@ -552,6 +552,50 @@ contract InputSettlerEscrowTest is InputSettlerEscrowTestBase {
         IInputSettlerEscrow(inputSettlerEscrow).refundOnNonFill(order, 0);
     }
 
+    /// @dev Off-by-one: `outputIndex == outputs.length` is out of bounds and must revert with the explicit custom
+    /// error rather than a generic array panic.
+    function test_revert_refund_on_non_fill_output_index_off_by_one() public {
+        uint32 fillDeadline = uint32(block.timestamp + 10 minutes);
+        (StandardOrder memory order,) =
+            _openOrderForNonFill(alwaysYesOracle, fillDeadline, uint32(block.timestamp + 5 hours), 1e18 / 10);
+
+        vm.warp(fillDeadline + 1);
+        // The order has exactly 1 output (index 0); index 1 is one past the end.
+        vm.expectRevert(abi.encodeWithSelector(InputSettlerEscrow.OutputIndexOutOfBounds.selector, 1, 1));
+        IInputSettlerEscrow(inputSettlerEscrow).refundOnNonFill(order, 1);
+    }
+
+    /// @dev An empty outputs array makes every index out of bounds; the guard reverts before indexing.
+    function test_revert_refund_on_non_fill_empty_outputs() public {
+        uint256 amount = 1e18 / 10;
+        uint32 fillDeadline = uint32(block.timestamp + 10 minutes);
+
+        token.mint(swapper, amount);
+        vm.prank(swapper);
+        token.approve(inputSettlerEscrow, amount);
+
+        uint256[2][] memory inputs = new uint256[2][](1);
+        inputs[0] = [uint256(uint160(address(token))), amount];
+
+        StandardOrder memory order = StandardOrder({
+            user: swapper,
+            nonce: 0,
+            originChainId: block.chainid,
+            expires: uint32(block.timestamp + 5 hours),
+            fillDeadline: fillDeadline,
+            inputOracle: alwaysYesOracle,
+            inputs: inputs,
+            outputs: new MandateOutput[](0)
+        });
+
+        vm.prank(swapper);
+        IInputSettlerEscrow(inputSettlerEscrow).open(order);
+
+        vm.warp(fillDeadline + 1);
+        vm.expectRevert(abi.encodeWithSelector(InputSettlerEscrow.OutputIndexOutOfBounds.selector, 0, 0));
+        IInputSettlerEscrow(inputSettlerEscrow).refundOnNonFill(order, 0);
+    }
+
     /// @dev Uses this contract as the input oracle (efficientRequireProven reverts unless the exact proof series was
     /// marked valid): only an attestation of the not-filled description built from the SIGNED fillDeadline releases
     /// the escrow — fill attestations (cross-consumption) and fabricated deadlines do not.

@@ -58,12 +58,21 @@ library MandateOutputEncodingLib {
     /// @dev Domain magic leading every serialised NotFilledDescription.
     bytes4 internal constant NOT_FILLED_MAGIC = bytes4(keccak256("OIF.NotFilled"));
 
-    /// @dev Minimum length of a serialised FillDescription: 4 + 32 + 32 + 4 + 100 (common payload with empty
-    /// call/context).
-    uint256 internal constant FILL_DESCRIPTION_MIN_LENGTH = 172;
-    /// @dev Minimum length of a serialised NotFilledDescription: 4 + 32 + 4 + 100 (common payload with empty
-    /// call/context).
-    uint256 internal constant NOT_FILLED_DESCRIPTION_MIN_LENGTH = 140;
+    /// @dev Offset at which the common payload begins in a serialised FillDescription:
+    /// FILL_MAGIC(4) + SOLVER(32) + ORDERID(32) + TIMESTAMP(4).
+    uint256 internal constant FILL_COMMON_PAYLOAD_OFFSET = 72;
+    /// @dev Offset at which the common payload begins in a serialised NotFilledDescription:
+    /// NOT_FILLED_MAGIC(4) + ORDERID(32) + FILL_DEADLINE(4).
+    uint256 internal constant NOT_FILLED_COMMON_PAYLOAD_OFFSET = 40;
+    /// @dev Minimum length of the common payload (TOKEN(32) + AMOUNT(32) + RECIPIENT(32) + CALL_LENGTH(2) +
+    /// CONTEXT_LENGTH(2)) with empty call/context.
+    uint256 internal constant COMMON_PAYLOAD_MIN_LENGTH = 100;
+
+    /// @dev Minimum length of a serialised FillDescription (common payload with empty call/context).
+    uint256 internal constant FILL_DESCRIPTION_MIN_LENGTH = FILL_COMMON_PAYLOAD_OFFSET + COMMON_PAYLOAD_MIN_LENGTH;
+    /// @dev Minimum length of a serialised NotFilledDescription (common payload with empty call/context).
+    uint256 internal constant NOT_FILLED_DESCRIPTION_MIN_LENGTH =
+        NOT_FILLED_COMMON_PAYLOAD_OFFSET + COMMON_PAYLOAD_MIN_LENGTH;
 
     // --- MandateOutput --- //
 

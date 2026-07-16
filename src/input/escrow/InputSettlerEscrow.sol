@@ -62,6 +62,10 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
      * Signature type not supported.
      */
     error SignatureNotSupported(bytes1);
+    /**
+     * @dev The provided output index is out of bounds for the order's outputs array.
+     */
+    error OutputIndexOutOfBounds(uint256 index, uint256 length);
 
     /**
      * @notice Emitted when an order is opened.
@@ -382,6 +386,10 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
     ) external virtual {
         _validateInputChain(order.originChainId);
         _validateTimestampHasPassed(order.fillDeadline);
+
+        if (outputIndex >= order.outputs.length) {
+            revert OutputIndexOutOfBounds(outputIndex, order.outputs.length);
+        }
 
         bytes32 orderId = order.orderIdentifier();
         _validateNonFill(order.fillDeadline, order.inputOracle, order.outputs[outputIndex], orderId);
