@@ -534,8 +534,9 @@ contract PolymerOracleMappedTest is Test {
     }
 
     /// @dev CRITICAL regression: a proof from an attacker-deployed program cannot forge an attestation for a victim's
-    ///      trusted oracle. Because the sender identity is `returnedProgramId` (authenticated), the forged attestation
-    ///      lands in the attacker's own slot and is invisible to any honest order that references the real program id.
+    ///      trusted oracle. With the enforced program-id binding the attacker can only name (and be authenticated as)
+    ///      their own program in the log, so the forged attestation lands in the attacker's own slot and is invisible
+    ///      to any honest order that references the real program id.
     function test_receiveSolanaMessage_forged_program_self_namespaces() public {
         uint32 solanaChainId = 2;
         bytes32 victimProgramID = keccak256("victim-solana-program");
@@ -545,9 +546,9 @@ contract PolymerOracleMappedTest is Test {
         bytes memory payload = bytes("release-funds");
         bytes32 payloadHash = keccak256(payload);
 
-        // Attacker emits a log via their own program; the in-log content is irrelevant to identity.
+        // The attacker can only produce a log naming their own program (the in-log id must equal the authenticated id).
         string[] memory logMessages = new string[](1);
-        logMessages[0] = _encodeSolanaLog(victimProgramID, application, payload);
+        logMessages[0] = _encodeSolanaLog(attackerProgramID, application, payload);
 
         // The prover authenticates the emitting program as the attacker's program.
         bytes memory mockProof =
@@ -568,13 +569,41 @@ contract PolymerOracleMappedTest is Test {
         assertTrue(polymerOracleMapped.isProven(remoteChainId, attackerProgramID, application, payloadHash));
     }
 
-    function test_receiveSolanaMessage_malformed_log_missing_delimiter_reverts() public {
+    /// @dev CRITICAL regression for Finding 1 (mapped variant): a log whose embedded program id does NOT equal the
+    ///      Polymer-authenticated `returnedProgramId` MUST revert. Tested in both directions.
+    function test_receiveSolanaMessage_program_id_mismatch_reverts_mapped() public {
+        uint32 solanaChainId = 2;
+        bytes32 victimProgramID = keccak256("victim-solana-program");
+        bytes32 attackerProgramID = keccak256("attacker-solana-program");
+        bytes32 application = makeAddr("settler").toIdentifier();
+        bytes memory payload = bytes("release-funds");
+
+        uint256 remoteChainId = uint256(solanaChainId);
+        vm.prank(owner);
+        polymerOracleMapped.setChainMap(remoteChainId, remoteChainId);
+
+        // Direction 1: authenticated as victim, but the log names the attacker's program.
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = _encodeSolanaLog(attackerProgramID, application, payload);
+        bytes memory proof1 = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, victimProgramID, logMessages);
+        vm.expectRevert(PolymerOracle.SolanaProgramIdMismatch.selector);
+        polymerOracleMapped.receiveSolanaMessage(proof1);
+
+        // Direction 2: authenticated as attacker, but the log names the victim's program.
+        logMessages[0] = _encodeSolanaLog(victimProgramID, application, payload);
+        bytes memory proof2 =
+            mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, attackerProgramID, logMessages);
+        vm.expectRevert(PolymerOracle.SolanaProgramIdMismatch.selector);
+        polymerOracleMapped.receiveSolanaMessage(proof2);
+    }
+
+    function test_receiveSolanaMessage_malformed_log_missing_prefix_reverts() public {
         uint32 solanaChainId = 2;
         bytes32 programID = keccak256("solana-program");
         bytes32 application = makeAddr("settler").toIdentifier();
         bytes memory payload = bytes("test-payload");
 
-        // A raw base64 blob with no `"program: ..., "` wrapper: no `", "` delimiter to split on.
+        // A raw base64 blob with no `"program: <base58>, "` wrapper: the authenticated prefix is absent.
         string[] memory logMessages = new string[](1);
         logMessages[0] = Base64.encode(abi.encodePacked(application, payload));
 
@@ -584,7 +613,26 @@ contract PolymerOracleMappedTest is Test {
         vm.prank(owner);
         polymerOracleMapped.setChainMap(remoteChainId, remoteChainId);
 
-        vm.expectRevert(PolymerOracle.MalformedSolanaLog.selector);
+        vm.expectRevert(PolymerOracle.SolanaProgramIdMismatch.selector);
+        polymerOracleMapped.receiveSolanaMessage(mockProof);
+    }
+
+    /// @dev Finding 3 (mapped variant): a 32-byte blob (application only, empty payload) must be rejected.
+    function test_receiveSolanaMessage_empty_payload_reverts_mapped() public {
+        uint32 solanaChainId = 2;
+        bytes32 programID = keccak256("solana-program");
+        bytes32 application = makeAddr("settler").toIdentifier();
+
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = mockCrossL2ProverV2.formatSolLogMessage(programID, abi.encodePacked(application));
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
+
+        uint256 remoteChainId = uint256(solanaChainId);
+        vm.prank(owner);
+        polymerOracleMapped.setChainMap(remoteChainId, remoteChainId);
+
+        vm.expectRevert(PolymerOracle.InvalidSolanaMessage.selector);
         polymerOracleMapped.receiveSolanaMessage(mockProof);
     }
 

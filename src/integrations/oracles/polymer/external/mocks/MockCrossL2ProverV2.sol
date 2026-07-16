@@ -18,8 +18,8 @@
 pragma solidity ^0.8.15;
 
 import { Base64 } from "openzeppelin/utils/Base64.sol";
-import { Strings } from "openzeppelin/utils/Strings.sol";
 
+import { Base58 } from "../../Base58.sol";
 import { CrossL2ProverV2 } from "../core/prove_api/CrossL2ProverV2.sol";
 
 contract MockCrossL2ProverV2 is CrossL2ProverV2 {
@@ -267,12 +267,12 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
      * @dev Formats a Solana log line in the shape `validateSolLogs` returns: a human-readable string of the form
      *      `"program: <base58 program id>, <base64 blob>"` (the on-chain `"Prove: "` prefix is already stripped).
      *
-     *      SIMPLIFICATION: real Polymer renders the program id in base58; this mock renders it in HEX instead. On-chain
-     *      base58 encoding is impractical (no cheap library) and the rendered program id is purely cosmetic here — the
-     *      oracle never parses it, extracting only the trailing base64 blob after the first `", "` delimiter (and hex,
-     *      like base58, contains no `", "`). True base58 fidelity is pinned separately by the immutable
-     *      `test_receiveSolanaMessage_golden_fixture` tests, which hardcode a real base58 program id in the log line.
-     *      The trailing base64 blob is what the oracle actually decodes.
+     *      The program id is rendered in base58 of the embedded bytes32 program id, matching both real Polymer output
+     *      and the oracle's enforced binding (the oracle requires the log to begin with exactly
+     *      `"program: " + base58(returnedProgramId) + ", "`). This keeps the mock producer consistent with the
+     *      consumer: passing `programId == returnedProgramId` yields a log the oracle accepts, while a mismatching id
+     *      produces a log the oracle rejects with `SolanaProgramIdMismatch`. The same base58 encoder used by the
+     *      oracle ({Base58}) is reused here so both sides agree byte-for-byte.
      * @param programId Solana program id embedded in the human-readable prefix.
      * @param blob Raw bytes to be base64-encoded as the log payload.
      * @return The formatted log string.
@@ -281,9 +281,7 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
         bytes32 programId,
         bytes memory blob
     ) public pure returns (string memory) {
-        return string(
-            abi.encodePacked("program: ", Strings.toHexString(uint256(programId), 32), ", ", Base64.encode(blob))
-        );
+        return string(abi.encodePacked("program: ", Base58.encode(programId), ", ", Base64.encode(blob)));
     }
 
     /**
