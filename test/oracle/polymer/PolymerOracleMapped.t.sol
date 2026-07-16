@@ -344,7 +344,7 @@ contract PolymerOracleMappedTest is Test {
     ///
     ///      `validateSolLogs` returns each log as a human-readable string of the form
     ///      `"program: <base58 program id>, <base64 blob>"`. The oracle extracts the trailing base64 blob and decodes
-    ///      it under layout (a): `application (32) || payload (dynamic)`. The sender identity is taken from the
+    ///      it under layout: `application (32) || payload (dynamic)`. The sender identity is taken from the
     ///      prover-authenticated `programID` (NOT from log content); the oracle attests over
     ///      `payloadHash = keccak256(payload)` and stores it under
     ///      `_attestations[remoteChainId][programID][application][payloadHash] = true`.
@@ -375,6 +375,35 @@ contract PolymerOracleMappedTest is Test {
         polymerOracleMapped.setChainMap(remoteChainId, remoteChainId);
 
         // Sender identity is the authenticated program id.
+        vm.expectEmit();
+        emit OutputProven(remoteChainId, programID, application, payloadHash);
+        polymerOracleMapped.receiveSolanaMessage(mockProof);
+
+        assertTrue(polymerOracleMapped.isProven(remoteChainId, programID, application, payloadHash));
+    }
+
+    /// @dev GOLDEN fixture (mapped variant). Immutable literals computed OFFLINE from the documented wire format
+    ///      `"program: <base58 program id>, <base64(source(32) || payload)>"`, independent of the mock's
+    ///      `formatSolLogMessage`. Pins the exact bytes the shipped oracle must accept and the attestation slot it
+    ///      must set for the Polymer-authenticated program id. See PolymerOracle.t.sol for the fixture derivation.
+    function test_receiveSolanaMessage_golden_fixture_mapped() public {
+        uint32 solanaChainId = 2;
+
+        bytes32 programID = 0x06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9;
+        bytes32 application = 0x00000000000000000000000000000000000000000000000000000000deadbeef;
+        // keccak256("golden-payload")
+        bytes32 payloadHash = 0x11d41300e405124d7e79e9a507b5abe013e238cf350fbf90a46fcca903614473;
+
+        string[] memory logMessages = new string[](1);
+        logMessages[0] =
+            "program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA, AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAN6tvu9nb2xkZW4tcGF5bG9hZA==";
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
+
+        uint256 remoteChainId = uint256(solanaChainId);
+        vm.prank(owner);
+        polymerOracleMapped.setChainMap(remoteChainId, remoteChainId);
+
         vm.expectEmit();
         emit OutputProven(remoteChainId, programID, application, payloadHash);
         polymerOracleMapped.receiveSolanaMessage(mockProof);

@@ -24,14 +24,14 @@ contract PolymerOracle is BaseInputOracle {
     error InvalidSolanaMessage();
     error MalformedSolanaLog();
 
-    uint256 constant SOLANA_POLYMER_CHAIN_ID = 2;
+    uint256 internal constant SOLANA_POLYMER_CHAIN_ID = 2;
 
-    // On-wire Solana blob layout offsets. Layout (a): `application(32) || payload(dynamic)`.
-    // To switch to layout (b) `program_id(32) || emitter(32) || application(32) || payload`, set these to 64 and 96.
-    uint256 constant SOLANA_APPLICATION_OFFSET = 0;
-    uint256 constant SOLANA_PAYLOAD_OFFSET = 32;
+    // On-wire Solana blob layout: `application(32) || payload(dynamic)`.
+    // The application identifier is at offset 0; the payload follows at offset 32.
+    uint256 internal constant SOLANA_APPLICATION_OFFSET = 0;
+    uint256 internal constant SOLANA_PAYLOAD_OFFSET = 32;
 
-    ICrossL2ProverV2 CROSS_L2_PROVER;
+    ICrossL2ProverV2 internal immutable CROSS_L2_PROVER;
 
     constructor(
         address crossL2Prover
@@ -115,14 +115,12 @@ contract PolymerOracle is BaseInputOracle {
      * Polymer). Only the trailing base64 blob is decoded; it is extracted as the substring after the first `", "`
      * delimiter (the base58 program id contains no comma).
      *
-     * On-wire blob layout (a) `application(32) || payload(dynamic)`:
+     * On-wire blob layout `application(32) || payload(dynamic)`:
      * - bytes[0:32]   = `application` (bytes32)  // application/settler identifier (source)
      * - bytes[32:]    = `payload` (bytes)        // raw payload bytes (dynamic length)
      *
-     * TODO(SVM): the Solana emitter `oracle_polymer::submit` currently emits
-     * `base64(program_id || oracle_polymer_pubkey || source || payload)` (4 fields). For layout (a) the SVM emit must
-     * be trimmed to `base64(source || payload)`. Do not touch the SVM here; if the identity is instead a PDA, switch
-     * to layout (b) by setting SOLANA_APPLICATION_OFFSET/SOLANA_PAYLOAD_OFFSET to 64/96.
+     * The Solana emitter `oracle_polymer::submit` emits `base64(source || payload)`: `source` is the
+     * 32-byte `application` at offset 0 and `payload` follows at offset 32.
      */
     function _processSolanaMessage(
         bytes calldata proof
@@ -130,11 +128,11 @@ contract PolymerOracle is BaseInputOracle {
         (uint32 chainId, bytes32 returnedProgramId, string[] memory logMessages) =
             CROSS_L2_PROVER.validateSolLogs(proof);
 
-        require(chainId == SOLANA_POLYMER_CHAIN_ID, NotSolanaMessage());
+        if (chainId != SOLANA_POLYMER_CHAIN_ID) revert NotSolanaMessage();
 
         uint256 remoteChainId = _getChainId(uint256(chainId));
 
-        for (uint256 i = 0; i < logMessages.length; i++) {
+        for (uint256 i = 0; i < logMessages.length; ++i) {
             bytes memory logBytes = Base64.decode(_extractSolanaLogBlob(logMessages[i]));
 
             if (logBytes.length < SOLANA_PAYLOAD_OFFSET) revert InvalidSolanaMessage();

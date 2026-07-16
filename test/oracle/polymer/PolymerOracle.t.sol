@@ -504,7 +504,7 @@ contract PolymerOracleTest is Test {
     /// ************** Solana Processing ************** ///
 
     /// @dev Builds a Solana log in the real Polymer format: `"program: <base58>, <base64 blob>"`, where the decoded
-    ///      blob is layout (a) `application(32) || payload(dynamic)`.
+    ///      blob is layout `application(32) || payload(dynamic)`.
     function _encodeSolanaLog(
         bytes32 programId,
         bytes32 application,
@@ -526,6 +526,44 @@ contract PolymerOracleTest is Test {
         bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
 
         // Sender identity is the authenticated program id.
+        vm.expectEmit();
+        emit OutputProven(uint256(solanaChainId), programID, application, payloadHash);
+        polymerOracle.receiveSolanaMessage(mockProof);
+
+        assertTrue(polymerOracle.isProven(uint256(solanaChainId), programID, application, payloadHash));
+    }
+
+    /// @dev GOLDEN fixture. The log line, program id, application and payload hash below are immutable literals
+    ///      computed OFFLINE from the documented wire format `"program: <base58 program id>, <base64(source(32) ||
+    ///      payload)>"` — deliberately independent of the mock's `formatSolLogMessage` (which renders the program id
+    ///      as hex). This pins the exact bytes the shipped oracle must accept and the attestation slot it must set for
+    ///      the Polymer-authenticated program id.
+    ///
+    ///      Fixture (base58 program id "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"):
+    ///      - programID (bytes32)   = 0x06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9
+    ///      - application (bytes32) = 0x...deadbeef
+    ///      - payload               = "golden-payload"
+    ///      - base64(application(32) || payload) = "AAAA...N6tvu9nb2xkZW4tcGF5bG9hZA=="
+    ///      - payloadHash = keccak256("golden-payload")
+    function test_receiveSolanaMessage_golden_fixture() public {
+        uint32 solanaChainId = 2;
+
+        // Program id authenticated by Polymer (proof[182:214]); the base58 rendering in the log line below is
+        // "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", which base58-decodes to exactly these 32 bytes.
+        bytes32 programID = 0x06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9;
+        bytes32 application = 0x00000000000000000000000000000000000000000000000000000000deadbeef;
+        // keccak256("golden-payload")
+        bytes32 payloadHash = 0x11d41300e405124d7e79e9a507b5abe013e238cf350fbf90a46fcca903614473;
+
+        // Hand-built log line in the exact form `validateSolLogs` returns. The trailing token is
+        // base64(application(32) || "golden-payload"); everything before ", " is the (cosmetic) program-id prefix the
+        // oracle never parses.
+        string[] memory logMessages = new string[](1);
+        logMessages[0] =
+            "program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA, AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAN6tvu9nb2xkZW4tcGF5bG9hZA==";
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
+
         vm.expectEmit();
         emit OutputProven(uint256(solanaChainId), programID, application, payloadHash);
         polymerOracle.receiveSolanaMessage(mockProof);

@@ -26,6 +26,27 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
     // Event for proof generation
     event ProofGenerated(bytes proof);
 
+    // --- Mock-specific errors --- //
+    error NoTopics();
+    error InvalidValidatorContract();
+    error ValidationCallFailed();
+    error EventEndExceedsProofLength();
+    error TopicsLengthMismatch();
+    error NoLogMessages();
+    error TooManyLogMessages();
+    error LogMessageEndExceedsProofLength();
+    error LogMessageEndExceedsUint16();
+
+    // --- Shared proof layout offsets (used by both the validators and the mock proof builders) --- //
+    /// @dev Source chain id occupies proof[CHAIN_ID_OFFSET:CHAIN_ID_OFFSET + 4].
+    uint256 internal constant CHAIN_ID_OFFSET = 97;
+    /// @dev Number of Solana log messages is a single byte at proof[SOL_NUM_LOGS_OFFSET].
+    uint256 internal constant SOL_NUM_LOGS_OFFSET = 117;
+    /// @dev Solana program id occupies proof[SOL_PROGRAM_ID_OFFSET:SOL_PROGRAM_ID_OFFSET + 32].
+    uint256 internal constant SOL_PROGRAM_ID_OFFSET = 182;
+    /// @dev First Solana log entry begins at proof[SOL_LOG_DATA_OFFSET] (right after the fixed header).
+    uint256 internal constant SOL_LOG_DATA_OFFSET = 214;
+
     constructor(
         string memory clientType_,
         address sequencer_,
@@ -46,7 +67,7 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
         bytes32[] memory topics,
         bytes memory data
     ) external returns (bytes memory) {
-        require(topics.length > 0, "At least one topic (event signature) required");
+        if (topics.length == 0) revert NoTopics();
 
         bytes memory proof = generateMockProof(chainId_, uint8(topics.length), emitter, topics, data);
 
@@ -70,14 +91,14 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
         bytes memory data,
         address validatorContract
     ) external returns (bytes memory) {
-        require(topics.length > 0, "At least one topic (event signature) required");
-        require(validatorContract != address(0), "Invalid validator contract address");
+        if (topics.length == 0) revert NoTopics();
+        if (validatorContract == address(0)) revert InvalidValidatorContract();
 
         bytes memory proof = generateMockProof(chainId_, uint8(topics.length), emitter, topics, data);
 
         // Call the validator contract's validateEvent function
         (bool success,) = validatorContract.call(abi.encodeWithSignature("validateEvent(bytes)", proof));
-        require(success, "Validation call failed");
+        if (!success) revert ValidationCallFailed();
 
         return proof;
     }
@@ -94,8 +115,8 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
         override
         returns (uint32 chainId, address emittingContract, bytes memory topics, bytes memory unindexedData)
     {
-        // Extract chainId from proof[97:101]
-        chainId = uint32(bytes4(proof[97:101]));
+        // Extract chainId from proof[CHAIN_ID_OFFSET:CHAIN_ID_OFFSET + 4]
+        chainId = uint32(bytes4(proof[CHAIN_ID_OFFSET:CHAIN_ID_OFFSET + 4]));
 
         // Skip sequencer signature verification (normally done with _verifySequencerSignature)
         // In production, this ensures the proof is signed by the sequencer, but for testing,
@@ -103,7 +124,7 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
 
         // Calculate event end from proof[121:123]
         uint256 eventEnd = uint256(uint16(bytes2(proof[121:123])));
-        require(eventEnd <= proof.length, "Event end exceeds proof length");
+        if (eventEnd > proof.length) revert EventEndExceedsProofLength();
         bytes memory rawEvent = proof[123:eventEnd];
 
         // Skip IAVL proof verification (normally done with verifyMembership)
@@ -121,18 +142,18 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
     function validateSolLogs(
         bytes calldata proof
     ) external pure override returns (uint32 chainId, bytes32 programID, string[] memory logMessages) {
-        // Extract chainId from proof[97:101]
-        chainId = uint32(bytes4(proof[97:101]));
+        // Extract chainId from proof[CHAIN_ID_OFFSET:CHAIN_ID_OFFSET + 4]
+        chainId = uint32(bytes4(proof[CHAIN_ID_OFFSET:CHAIN_ID_OFFSET + 4]));
 
         // Skip sequencer signature verification (normally done with _verifySequencerSignature)
         // In production, this ensures the proof is signed by the sequencer, but for testing,
         // we assume a valid signature.
 
-        // Extract programID from proof[182:214]
-        programID = bytes32(proof[182:214]);
+        // Extract programID from proof[SOL_PROGRAM_ID_OFFSET:SOL_PROGRAM_ID_OFFSET + 32]
+        programID = bytes32(proof[SOL_PROGRAM_ID_OFFSET:SOL_PROGRAM_ID_OFFSET + 32]);
 
-        // Extract number of log messages from proof[117]
-        uint8 numLogMessages = uint8(proof[117]);
+        // Extract number of log messages from proof[SOL_NUM_LOGS_OFFSET]
+        uint8 numLogMessages = uint8(proof[SOL_NUM_LOGS_OFFSET]);
         logMessages = new string[](numLogMessages);
 
         // Parse log messages
@@ -145,13 +166,13 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
         // So the first log looks like:
         //   [ log0_end (2 bytes) ][ log0_bytes ... up to log0_end-1 ]
         // The second log immediately follows, starting at log0_end, with its own 2-byte end offset, etc.
-        uint256 currLogMessageStart = 214;
-        uint256 currentLogMessageEnd = 214; // Initialised for the 0-log edge case
+        uint256 currLogMessageStart = SOL_LOG_DATA_OFFSET;
+        uint256 currentLogMessageEnd = SOL_LOG_DATA_OFFSET; // Initialised for the 0-log edge case
 
         for (uint256 i = 0; i < logMessages.length; ++i) {
             // Read the absolute end offset of this log's bytes
             currentLogMessageEnd = uint16(bytes2(proof[currLogMessageStart:currLogMessageStart + 2]));
-            require(currentLogMessageEnd <= proof.length, "Log message end exceeds proof length");
+            if (currentLogMessageEnd > proof.length) revert LogMessageEndExceedsProofLength();
 
             // Slice out the log string bytes (skip the 2-byte end offset)
             logMessages[i] = string(proof[currLogMessageStart + 2:currentLogMessageEnd]);
@@ -181,7 +202,7 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
         bytes32[] memory topics_,
         bytes memory unindexedData_
     ) public pure returns (bytes memory) {
-        require(topics_.length == numTopics, "Topics length mismatch");
+        if (topics_.length != numTopics) revert TopicsLengthMismatch();
 
         // Calculate lengths
         uint256 topicsLength = numTopics * 32;
@@ -199,7 +220,7 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
         // populate given chainId (4 bytes)
         bytes4 chainIdBytes = bytes4(chainId_);
         for (uint256 i = 0; i < 4; i++) {
-            proof[97 + i] = chainIdBytes[i];
+            proof[CHAIN_ID_OFFSET + i] = chainIdBytes[i];
         }
         // peptideHeight (proof[101:109]) dummy value of 100
         proof[108] = bytes1(uint8(100));
@@ -243,10 +264,15 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
     }
 
     /**
-     * @dev Formats a Solana log line exactly as `validateSolLogs` returns it: a human-readable string of the form
+     * @dev Formats a Solana log line in the shape `validateSolLogs` returns: a human-readable string of the form
      *      `"program: <base58 program id>, <base64 blob>"` (the on-chain `"Prove: "` prefix is already stripped).
-     *      The base58 program id is stand-in-encoded here as hex, which is sufficient for exercising the parser (it
-     *      contains no `", "` delimiter). The trailing base64 blob is what the oracle actually decodes.
+     *
+     *      SIMPLIFICATION: real Polymer renders the program id in base58; this mock renders it in HEX instead. On-chain
+     *      base58 encoding is impractical (no cheap library) and the rendered program id is purely cosmetic here — the
+     *      oracle never parses it, extracting only the trailing base64 blob after the first `", "` delimiter (and hex,
+     *      like base58, contains no `", "`). True base58 fidelity is pinned separately by the immutable
+     *      `test_receiveSolanaMessage_golden_fixture` tests, which hardcode a real base58 program id in the log line.
+     *      The trailing base64 blob is what the oracle actually decodes.
      * @param programId Solana program id embedded in the human-readable prefix.
      * @param blob Raw bytes to be base64-encoded as the log payload.
      * @return The formatted log string.
@@ -272,7 +298,7 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
         bytes32 programID,
         string[] memory logMessages
     ) external returns (bytes memory) {
-        require(logMessages.length > 0, "At least one log message required");
+        if (logMessages.length == 0) revert NoLogMessages();
 
         bytes memory proof = generateMockSolProof(chainId_, programID, logMessages);
 
@@ -292,8 +318,8 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
         bytes32 programID,
         string[] memory logMessages_
     ) public pure returns (bytes memory) {
-        require(logMessages_.length > 0, "At least one log message required");
-        require(logMessages_.length <= 255, "Too many log messages");
+        if (logMessages_.length == 0) revert NoLogMessages();
+        if (logMessages_.length > 255) revert TooManyLogMessages();
 
         // Calculate total length of all log messages
         uint256 totalLogLength = 0;
@@ -302,10 +328,11 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
         }
 
         // Calculate proof length:
-        // - Fixed header: 214 bytes (state root + signature + chainId + heights + numLogs + txSig + programID)
+        // - Fixed header: SOL_LOG_DATA_OFFSET bytes (state root + signature + chainId + heights + numLogs + txSig +
+        //   programID)
         // - Log messages: totalLogLength bytes
         // - IAVL proof: 32 bytes (dummy)
-        uint256 proofLength = 214 + totalLogLength + 32;
+        uint256 proofLength = SOL_LOG_DATA_OFFSET + totalLogLength + 32;
 
         bytes memory proof = new bytes(proofLength);
 
@@ -313,10 +340,10 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
         // - stateRoot (32 bytes): dummy
         // - signature (65 bytes): dummy
 
-        // Populate chainId (4 bytes) at proof[97:101]
+        // Populate chainId (4 bytes) at proof[CHAIN_ID_OFFSET:CHAIN_ID_OFFSET + 4]
         bytes4 chainIdBytes = bytes4(chainId_);
         for (uint256 i = 0; i < 4; i++) {
-            proof[97 + i] = chainIdBytes[i];
+            proof[CHAIN_ID_OFFSET + i] = chainIdBytes[i];
         }
 
         // peptideHeight (proof[101:109]) - dummy value of 100
@@ -325,24 +352,24 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
         // blockHeight (proof[109:117]) - dummy value of 200
         proof[116] = bytes1(uint8(200));
 
-        // number of log messages (proof[117])
-        proof[117] = bytes1(uint8(logMessages_.length));
+        // number of log messages (proof[SOL_NUM_LOGS_OFFSET])
+        proof[SOL_NUM_LOGS_OFFSET] = bytes1(uint8(logMessages_.length));
 
         // txSignature high (proof[118:150]) - dummy value
         // txSignature low (proof[150:182]) - dummy value
         // (already 0)
 
-        // programID (proof[182:214])
+        // programID (proof[SOL_PROGRAM_ID_OFFSET:SOL_PROGRAM_ID_OFFSET + 32])
         for (uint256 i = 0; i < 32; i++) {
-            proof[182 + i] = programID[i];
+            proof[SOL_PROGRAM_ID_OFFSET + i] = programID[i];
         }
 
-        // Encode log messages starting at proof[214]
-        uint256 offset = 214;
+        // Encode log messages starting at proof[SOL_LOG_DATA_OFFSET]
+        uint256 offset = SOL_LOG_DATA_OFFSET;
         for (uint256 i = 0; i < logMessages_.length; i++) {
             bytes memory logBytes = bytes(logMessages_[i]);
             uint256 logEnd = offset + 2 + logBytes.length;
-            require(logEnd <= type(uint16).max, "Log message end exceeds uint16 range");
+            if (logEnd > type(uint16).max) revert LogMessageEndExceedsUint16();
 
             // Write 2-byte length prefix (big endian)
             bytes2 logEndBytes = bytes2(uint16(logEnd));
