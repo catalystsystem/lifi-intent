@@ -4,7 +4,9 @@ pragma solidity ^0.8.22;
 
 import { Test } from "forge-std/Test.sol";
 
+import { Base64 } from "openzeppelin/utils/Base64.sol";
 import { MandateOutput } from "src/input/types/MandateOutputType.sol";
+import { Base58 } from "src/integrations/oracles/polymer/Base58.sol";
 import { PolymerOracle } from "src/integrations/oracles/polymer/PolymerOracle.sol";
 import { MockCrossL2ProverV2 } from "src/integrations/oracles/polymer/external/mocks/MockCrossL2ProverV2.sol";
 import { LibAddress } from "src/libs/LibAddress.sol";
@@ -498,5 +500,204 @@ contract PolymerOracleTest is Test {
         IInputSettlerEscrow(inputSettlerEscrow).finalise(order, solveParams, solver.toIdentifier(), hex"");
 
         assertEq(token.balanceOf(solver), amount);
+    }
+
+    /// ************** Solana Processing ************** ///
+
+    /// @dev Builds a Solana log in the real Polymer format: `"program: <base58>, <base64 blob>"`, where the decoded
+    ///      blob is layout `application(32) || payload(dynamic)`.
+    function _encodeSolanaLog(
+        bytes32 programId,
+        bytes32 application,
+        bytes memory payload
+    ) internal view returns (string memory) {
+        return mockCrossL2ProverV2.formatSolLogMessage(programId, abi.encodePacked(application, payload));
+    }
+
+    function test_receiveSolanaMessage_with_proof() public {
+        uint32 solanaChainId = 2; // base variant uses identity chain mapping.
+        bytes32 programID = keccak256("solana-program");
+        bytes32 application = makeAddr("settler").toIdentifier();
+        bytes memory payload = bytes("test-payload");
+        bytes32 payloadHash = keccak256(payload);
+
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = _encodeSolanaLog(programID, application, payload);
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
+
+        // Sender identity is the authenticated program id.
+        vm.expectEmit();
+        emit OutputProven(uint256(solanaChainId), programID, application, payloadHash);
+        polymerOracle.receiveSolanaMessage(mockProof);
+
+        assertTrue(polymerOracle.isProven(uint256(solanaChainId), programID, application, payloadHash));
+    }
+
+    /// @dev GOLDEN fixture. The log line, program id, application and payload hash below are immutable literals
+    ///      computed OFFLINE from the documented wire format `"program: <base58 program id>, <base64(source(32) ||
+    ///      payload)>"`. This pins the exact bytes the shipped oracle must accept and the attestation slot it must set
+    ///      for the Polymer-authenticated program id, and cross-checks the on-chain {Base58} encoder: the oracle only
+    ///      accepts this log if `base58(programID)` equals the hand-written "TokenkegQ..." base58 rendering.
+    ///
+    ///      Fixture (base58 program id "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"):
+    ///      - programID (bytes32)   = 0x06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9
+    ///      - application (bytes32) = 0x...deadbeef
+    ///      - payload               = "golden-payload"
+    ///      - base64(application(32) || payload) = "AAAA...N6tvu9nb2xkZW4tcGF5bG9hZA=="
+    ///      - payloadHash = keccak256("golden-payload")
+    function test_receiveSolanaMessage_golden_fixture() public {
+        uint32 solanaChainId = 2;
+
+        // Program id authenticated by Polymer (proof[182:214]); the base58 rendering in the log line below is
+        // "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", which base58-decodes to exactly these 32 bytes.
+        bytes32 programID = 0x06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9;
+        bytes32 application = 0x00000000000000000000000000000000000000000000000000000000deadbeef;
+        // keccak256("golden-payload")
+        bytes32 payloadHash = 0x11d41300e405124d7e79e9a507b5abe013e238cf350fbf90a46fcca903614473;
+
+        // Hand-built log line in the exact form `validateSolLogs` returns. The trailing token is
+        // base64(application(32) || "golden-payload"); the prefix "program: TokenkegQ..., " must equal
+        // "program: " + base58(programID) + ", " or the oracle rejects it with SolanaProgramIdMismatch.
+        string[] memory logMessages = new string[](1);
+        logMessages[0] =
+            "program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA, AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAN6tvu9nb2xkZW4tcGF5bG9hZA==";
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
+
+        vm.expectEmit();
+        emit OutputProven(uint256(solanaChainId), programID, application, payloadHash);
+        polymerOracle.receiveSolanaMessage(mockProof);
+
+        assertTrue(polymerOracle.isProven(uint256(solanaChainId), programID, application, payloadHash));
+    }
+
+    /// @dev CRITICAL regression on the base variant: with the enforced program-id binding an attacker can only name
+    ///      (and be authenticated as) their OWN program id in the log, so their forged attestation lands under the
+    ///      attacker's own program id and is invisible to any honest order that references the real (victim) program.
+    function test_receiveSolanaMessage_forged_program_self_namespaces() public {
+        uint32 solanaChainId = 2;
+        bytes32 victimProgramID = keccak256("victim-solana-program");
+        bytes32 attackerProgramID = keccak256("attacker-solana-program");
+        bytes32 application = makeAddr("settler").toIdentifier();
+        bytes memory payload = bytes("release-funds");
+        bytes32 payloadHash = keccak256(payload);
+
+        // The attacker can only produce a log naming their own program (the binding requires the in-log id to equal
+        // the Polymer-authenticated program id).
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = _encodeSolanaLog(attackerProgramID, application, payload);
+
+        bytes memory mockProof =
+            mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, attackerProgramID, logMessages);
+
+        vm.expectEmit();
+        emit OutputProven(uint256(solanaChainId), attackerProgramID, application, payloadHash);
+        polymerOracle.receiveSolanaMessage(mockProof);
+
+        assertFalse(polymerOracle.isProven(uint256(solanaChainId), victimProgramID, application, payloadHash));
+        assertTrue(polymerOracle.isProven(uint256(solanaChainId), attackerProgramID, application, payloadHash));
+    }
+
+    /// @dev CRITICAL regression for Finding 1: a log whose embedded program id does NOT equal the Polymer-authenticated
+    ///      `returnedProgramId` MUST revert. Tested in both directions (victim-returned/attacker-in-log and vice
+    ///      versa) so a mismatching (returnedProgramId, in-log id) pair can never slip through.
+    function test_receiveSolanaMessage_program_id_mismatch_reverts() public {
+        uint32 solanaChainId = 2;
+        bytes32 victimProgramID = keccak256("victim-solana-program");
+        bytes32 attackerProgramID = keccak256("attacker-solana-program");
+        bytes32 application = makeAddr("settler").toIdentifier();
+        bytes memory payload = bytes("release-funds");
+
+        // Direction 1: authenticated as victim, but the log names the attacker's program.
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = _encodeSolanaLog(attackerProgramID, application, payload);
+        bytes memory proof1 = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, victimProgramID, logMessages);
+        vm.expectRevert(PolymerOracle.SolanaProgramIdMismatch.selector);
+        polymerOracle.receiveSolanaMessage(proof1);
+
+        // Direction 2: authenticated as attacker, but the log names the victim's program.
+        logMessages[0] = _encodeSolanaLog(victimProgramID, application, payload);
+        bytes memory proof2 =
+            mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, attackerProgramID, logMessages);
+        vm.expectRevert(PolymerOracle.SolanaProgramIdMismatch.selector);
+        polymerOracle.receiveSolanaMessage(proof2);
+    }
+
+    function test_receiveSolanaMessage_wrong_chain_id_reverts() public {
+        uint32 wrongChainId = 1; // Not Solana (should be 2)
+        bytes32 programID = keccak256("solana-program");
+        bytes32 application = makeAddr("settler").toIdentifier();
+        bytes memory payload = bytes("test-payload");
+
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = _encodeSolanaLog(programID, application, payload);
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(wrongChainId, programID, logMessages);
+
+        vm.expectRevert(PolymerOracle.NotSolanaMessage.selector);
+        polymerOracle.receiveSolanaMessage(mockProof);
+    }
+
+    function test_receiveSolanaMessage_malformed_log_missing_prefix_reverts() public {
+        uint32 solanaChainId = 2;
+        bytes32 programID = keccak256("solana-program");
+        bytes32 application = makeAddr("settler").toIdentifier();
+        bytes memory payload = bytes("test-payload");
+
+        // Raw base64 blob with no `"program: <base58>, "` wrapper: the authenticated prefix is absent.
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = Base64.encode(abi.encodePacked(application, payload));
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
+
+        vm.expectRevert(PolymerOracle.SolanaProgramIdMismatch.selector);
+        polymerOracle.receiveSolanaMessage(mockProof);
+    }
+
+    function test_receiveSolanaMessage_invalid_solana_message_reverts() public {
+        uint32 solanaChainId = 2;
+        bytes32 programID = keccak256("solana-program");
+
+        // Decoded blob shorter than the required application(32) field.
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = mockCrossL2ProverV2.formatSolLogMessage(programID, abi.encodePacked(bytes4(0xdeadbeef)));
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
+
+        vm.expectRevert(PolymerOracle.InvalidSolanaMessage.selector);
+        polymerOracle.receiveSolanaMessage(mockProof);
+    }
+
+    /// @dev Finding 3: a 32-byte blob decodes to `application(32)` with an EMPTY payload; it must be rejected rather
+    ///      than attesting over keccak256("").
+    function test_receiveSolanaMessage_empty_payload_reverts() public {
+        uint32 solanaChainId = 2;
+        bytes32 programID = keccak256("solana-program");
+        bytes32 application = makeAddr("settler").toIdentifier();
+
+        // Exactly 32 bytes: application field only, no payload.
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = mockCrossL2ProverV2.formatSolLogMessage(programID, abi.encodePacked(application));
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
+
+        vm.expectRevert(PolymerOracle.InvalidSolanaMessage.selector);
+        polymerOracle.receiveSolanaMessage(mockProof);
+    }
+
+    /// @dev Unit test for the on-chain {Base58} encoder against the known golden program-id vector: the bytes32
+    ///      0x06ddf6...eff00a9 MUST base58-encode to "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" (the same value the
+    ///      golden-fixture log line hard-codes and the oracle's binding depends on).
+    function test_base58_encode_golden_program_id() public pure {
+        bytes32 programID = 0x06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9;
+        assertEq(Base58.encode(programID), "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    }
+
+    /// @dev Base58 leading-zero rule: each leading 0x00 byte maps to one leading '1'.
+    function test_base58_encode_leading_zeros() public pure {
+        assertEq(Base58.encode(bytes32(0)), "11111111111111111111111111111111");
+        // 0x00...0001 -> 31 leading '1' + '2' (value 1 is the second alphabet symbol).
+        assertEq(Base58.encode(bytes32(uint256(1))), "11111111111111111111111111111112");
     }
 }
