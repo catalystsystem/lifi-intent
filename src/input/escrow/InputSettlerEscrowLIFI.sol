@@ -225,18 +225,18 @@ contract InputSettlerEscrowLIFI is InputSettlerEscrow, GovernanceFee {
         uint256 numInputs = inputs.length;
         for (uint256 i; i < numInputs; ++i) {
             uint256[2] memory input = inputs[i];
-            address token = input[0].fromIdentifier();
+            uint256 tokenId = input[0];
             uint256 amount = input[1];
 
             uint256 calculatedFee = _calcFee(amount, fee);
             if (calculatedFee > 0) {
-                _transfer(token, _owner, calculatedFee);
+                _sendInputAsset(tokenId, _owner, calculatedFee);
                 unchecked {
                     amount = amount - calculatedFee;
                 }
             }
 
-            _transfer(token, destination, amount);
+            _sendInputAsset(tokenId, destination, amount);
         }
     }
 

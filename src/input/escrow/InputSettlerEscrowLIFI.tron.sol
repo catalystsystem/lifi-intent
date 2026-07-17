@@ -20,6 +20,12 @@ contract InputSettlerEscrowLIFITron is InputSettlerEscrowLIFI {
         return "OIFEscrowLIFITron";
     }
 
+    /// @dev Native (token 0) inputs are out of scope on Tron: the payout hooks here are TRC20-only and native TRX
+    /// support is not an intended feature. Rejecting at open keeps token 0 unreachable on every later path.
+    function _nativeInputSupported() internal pure override returns (bool) {
+        return false;
+    }
+
     function _transfer(address token, address to, uint256 amount) internal override {
         SafeTransferLibTron.safeTransfer(token, to, amount);
     }

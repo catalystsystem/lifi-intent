@@ -36,6 +36,14 @@ contract InputSettlerEscrowTron is InputSettlerEscrow {
     }
 
     /**
+     * @dev Native (token 0) inputs are out of scope on TRON: the payout hooks here are TRC20-only and native TRX
+     * support is not an intended feature. Rejecting at open keeps token 0 unreachable on every later path.
+     */
+    function _nativeInputSupported() internal pure override returns (bool) {
+        return false;
+    }
+
+    /**
      * @dev Pays out an escrowed input with {SafeTRC20}, sending the configured {USDT} via {SafeTRC20-safeTransferUSDT}.
      */
     function _transfer(

@@ -12,11 +12,11 @@ interface IInputSettlerEscrow {
         StandardOrder calldata order,
         address sponsor,
         bytes calldata signature
-    ) external;
+    ) external payable;
 
     function open(
         StandardOrder calldata order
-    ) external;
+    ) external payable;
 
     function finalise(
         StandardOrder calldata order,
