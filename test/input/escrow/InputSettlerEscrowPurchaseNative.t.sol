@@ -9,22 +9,12 @@ import { InputSettlerPurchase } from "../../../src/input/InputSettlerPurchase.so
 import { InputSettlerEscrow } from "../../../src/input/escrow/InputSettlerEscrow.sol";
 import { InputSettlerEscrowTron } from "../../../src/input/escrow/InputSettlerEscrowTron.sol";
 import { MandateOutput } from "../../../src/input/types/MandateOutputType.sol";
-import { OrderPurchase } from "../../../src/input/types/OrderPurchaseType.sol";
+import { OrderPurchase, OrderPurchaseType } from "../../../src/input/types/OrderPurchaseType.sol";
 import { StandardOrder } from "../../../src/input/types/StandardOrderType.sol";
 import { IInputSettlerEscrow } from "../../../src/interfaces/IInputSettlerEscrow.sol";
 import { LibAddress } from "../../../src/libs/LibAddress.sol";
 
-import { InputSettlerEscrowTestBase } from "./InputSettlerEscrow.base.t.sol";
-
-contract InputSettlerEscrowTronPurchaseHarness is InputSettlerEscrowTron {
-    constructor() InputSettlerEscrowTron(address(0)) { }
-
-    function markDeposited(
-        bytes32 orderId
-    ) external {
-        orderStatus[orderId] = OrderStatus.Deposited;
-    }
-}
+import { EIP712, InputSettlerEscrowTestBase } from "./InputSettlerEscrow.base.t.sol";
 
 contract InputSettlerEscrowPurchaseNativeTest is InputSettlerEscrowTestBase {
     using LibAddress for address;
@@ -114,6 +104,20 @@ contract InputSettlerEscrowPurchaseNativeTest is InputSettlerEscrowTestBase {
             orderId: orderId, destination: solver, callData: hex"", discount: discount, timeToBuy: 1000
         });
         signature = this.getOrderPurchaseSignature(solverPrivateKey, purchase);
+    }
+
+    function getOrderPurchaseSignatureFor(
+        uint256 privateKey,
+        address settler,
+        OrderPurchase calldata purchase
+    ) external view returns (bytes memory signature) {
+        bytes32 digest = keccak256(
+            abi.encodePacked(
+                "\x19\x01", EIP712(settler).DOMAIN_SEPARATOR(), OrderPurchaseType.hashOrderPurchase(purchase)
+            )
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
+        signature = bytes.concat(r, s, bytes1(v));
     }
 
     function _solveParams() internal view returns (InputSettlerBase.SolveParams[] memory solveParams) {
@@ -246,20 +250,31 @@ contract InputSettlerEscrowPurchaseNativeTest is InputSettlerEscrowTestBase {
         assertEq(inputSettlerEscrow.balance, NATIVE_AMOUNT);
     }
 
-    function test_tron_native_purchase_reverts_native_token_not_supported() public {
-        InputSettlerEscrowTronPurchaseHarness tronSettler = new InputSettlerEscrowTronPurchaseHarness();
+    function test_tron_native_open_and_purchase_succeeds() public {
+        InputSettlerEscrowTron tronSettler = new InputSettlerEscrowTron(address(0));
         StandardOrder memory order = _nativeOrder(NATIVE_AMOUNT, 9);
+        vm.deal(swapper, NATIVE_AMOUNT);
+        vm.prank(swapper);
+        tronSettler.open{ value: NATIVE_AMOUNT }(order);
+
         bytes32 orderId = tronSettler.orderIdentifier(order);
-        tronSettler.markDeposited(orderId);
         OrderPurchase memory purchase =
             OrderPurchase({ orderId: orderId, destination: solver, callData: hex"", discount: 0, timeToBuy: 1000 });
+        bytes memory signature = this.getOrderPurchaseSignatureFor(solverPrivateKey, address(tronSettler), purchase);
         vm.deal(purchaser, NATIVE_AMOUNT);
+        uint256 solverBalanceBefore = solver.balance;
 
         vm.prank(purchaser);
-        vm.expectRevert(InputSettlerEscrow.NativeTokenNotSupported.selector);
         tronSettler.purchaseOrder{ value: NATIVE_AMOUNT }(
-            purchase, order, solver.toIdentifier(), purchaser.toIdentifier(), type(uint256).max, hex""
+            purchase, order, solver.toIdentifier(), purchaser.toIdentifier(), type(uint256).max, signature
         );
+
+        assertEq(solver.balance - solverBalanceBefore, NATIVE_AMOUNT);
+        assertEq(address(tronSettler).balance, NATIVE_AMOUNT);
+        (uint32 lastOrderTimestamp, bytes32 storedPurchaser) =
+            tronSettler.purchasedOrders(solver.toIdentifier(), orderId);
+        assertEq(lastOrderTimestamp, 0);
+        assertEq(storedPurchaser, purchaser.toIdentifier());
     }
 }
 

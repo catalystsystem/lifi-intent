@@ -183,15 +183,6 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
     }
 
     /**
-     * @notice Returns whether this settler accepts native (token 0) inputs.
-     * @dev Override to false on variants whose chain-native currency is out of scope (e.g. Tron, where the payout
-     * hooks are ERC-20-only and native TRX support is not an intended feature).
-     */
-    function _nativeInputSupported() internal pure virtual returns (bool) {
-        return true;
-    }
-
-    /**
      * @notice Validates that the order's user is non-zero.
      * @dev `order.user` is the refund recipient; refunds to the zero address would be burned.
      */
@@ -222,7 +213,6 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
             // Reverts on dirty upper bits: token 0 is the only representation of native.
             input[0].validatedCleanAddress();
             if (input[0] == 0) {
-                if (!_nativeInputSupported()) revert NativeTokenNotSupported();
                 // Checked arithmetic: an overflowing native sum reverts.
                 nativeAmount += input[1];
             }
@@ -708,9 +698,6 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
         for (uint256 i = 0; i < numInputs; ++i) {
             uint256[2] calldata input = inputs[i];
             if (input[0] == 0) {
-                // Native inputs are deliberately rejected by Tron variants.
-                // forge-lint: disable-next-line(require-revert-in-loop)
-                if (!_nativeInputSupported()) revert NativeTokenNotSupported();
                 nativeAmount += (input[1] * (DISCOUNT_DENOM - discount)) / DISCOUNT_DENOM;
             }
         }
@@ -724,7 +711,6 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
      */
     function _transferInput(uint256 tokenId, address to, uint256 amount) internal virtual override {
         if (tokenId == 0) {
-            if (!_nativeInputSupported()) revert NativeTokenNotSupported();
             // The exact-value guard makes msg.value, rather than pooled escrow, the source of this payment.
             // forge-lint: disable-next-line(arbitrary-send-eth)
             if (amount > 0) Address.sendValue(payable(to), amount);
