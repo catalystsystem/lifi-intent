@@ -7,7 +7,6 @@ pragma solidity ^0.8.26;
 import { InputSettlerBase } from "../../../src/input/InputSettlerBase.sol";
 import { InputSettlerEscrow } from "../../../src/input/escrow/InputSettlerEscrow.sol";
 import { MandateOutput } from "../../../src/input/types/MandateOutputType.sol";
-import { OrderPurchase } from "../../../src/input/types/OrderPurchaseType.sol";
 import { StandardOrder } from "../../../src/input/types/StandardOrderType.sol";
 import { IInputSettlerEscrow } from "../../../src/interfaces/IInputSettlerEscrow.sol";
 import { LibAddress } from "../../../src/libs/LibAddress.sol";
@@ -272,25 +271,8 @@ contract InputSettlerEscrowNativeTest is InputSettlerEscrowTestBase {
         IInputSettlerEscrow(inputSettlerEscrow).open(order);
     }
 
-    function test_native_input_order_is_not_purchasable() public {
-        StandardOrder memory order = _nativeOrder(swapper, NATIVE_AMOUNT, 16);
-        _openNative(order, NATIVE_AMOUNT);
-        bytes32 orderId = IInputSettlerEscrow(inputSettlerEscrow).orderIdentifier(order);
-        OrderPurchase memory purchase =
-            OrderPurchase({ orderId: orderId, destination: solver, callData: hex"", discount: 0, timeToBuy: 1000 });
-        bytes memory signature = this.getOrderPurchaseSignature(solverPrivateKey, purchase);
-
-        // spec-adjudication: FINDINGS #5.
-        vm.prank(purchaser);
-        vm.expectRevert(InputSettlerEscrow.NativeTokenNotSupported.selector);
-        InputSettlerEscrow(inputSettlerEscrow)
-            .purchaseOrder(
-                purchase, order, solver.toIdentifier(), purchaser.toIdentifier(), type(uint256).max, signature
-            );
-    }
-
     function test_zero_amount_native_input_send_is_skipped() public {
-        StandardOrder memory order = _nativeOrder(swapper, 0, 17);
+        StandardOrder memory order = _nativeOrder(swapper, 0, 16);
         IInputSettlerEscrow(inputSettlerEscrow).open(order);
         NoNativeReceiver destination = new NoNativeReceiver();
 

@@ -64,5 +64,5 @@ interface IInputSettlerEscrow {
         bytes32 purchaser,
         uint256 expiryTimestamp,
         bytes memory solverSignature
-    ) external;
+    ) external payable;
 }

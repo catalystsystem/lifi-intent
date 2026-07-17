@@ -681,7 +681,7 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
         bytes32 purchaser,
         uint256 expiryTimestamp,
         bytes calldata solverSignature
-    ) external virtual {
+    ) external payable virtual {
         _validateInputChain(order.originChainId);
         _validateTimestampHasNotPassed(order.expires);
         bytes32 computedOrderId = order.orderIdentifier();
@@ -692,19 +692,44 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
         OrderStatus status = orderStatus[computedOrderId];
         if (status != OrderStatus.Deposited) revert InvalidOrderStatus();
 
+        _validatePurchaseNativeValue(order.inputs, orderPurchase.discount);
         _purchaseOrder(
             orderPurchase, order.inputs, orderSolvedByIdentifier, purchaser, expiryTimestamp, solverSignature
         );
     }
 
     /**
+     * @dev Requires msg.value to exactly fund every discounted native input before the purchase makes external calls.
+     * This prevents a purchaser from paying a native-input solver with ETH pooled for other escrowed orders.
+     */
+    function _validatePurchaseNativeValue(uint256[2][] calldata inputs, uint256 discount) internal view {
+        uint256 nativeAmount = 0;
+        uint256 numInputs = inputs.length;
+        for (uint256 i = 0; i < numInputs; ++i) {
+            uint256[2] calldata input = inputs[i];
+            if (input[0] == 0) {
+                // Native inputs are deliberately rejected by Tron variants.
+                // forge-lint: disable-next-line(require-revert-in-loop)
+                if (!_nativeInputSupported()) revert NativeTokenNotSupported();
+                nativeAmount += (input[1] * (DISCOUNT_DENOM - discount)) / DISCOUNT_DENOM;
+            }
+        }
+        if (msg.value != nativeAmount) revert InvalidNativeValue(nativeAmount, msg.value);
+    }
+
+    /**
      * @inheritdoc InputSettlerPurchase
-     * @dev Orders containing a native (token 0) input cannot be purchased: the purchase price is pulled from the
-     * purchaser via `transferFrom`, which has no native equivalent. Explicit rejection (mirroring
-     * InputSettlerCompact) instead of relying on the incidental revert of an ERC20 call to address(0).
+     * @dev Native purchase funds are pushed from the exact msg.value validated before {_purchaseOrder}; ERC20 funds
+     * remain pull-based from msg.sender. Zero-value native sends are skipped for recipients without a receive hook.
      */
     function _transferInput(uint256 tokenId, address to, uint256 amount) internal virtual override {
-        if (tokenId == 0) revert NativeTokenNotSupported();
-        super._transferInput(tokenId, to, amount);
+        if (tokenId == 0) {
+            if (!_nativeInputSupported()) revert NativeTokenNotSupported();
+            // The exact-value guard makes msg.value, rather than pooled escrow, the source of this payment.
+            // forge-lint: disable-next-line(arbitrary-send-eth)
+            if (amount > 0) Address.sendValue(payable(to), amount);
+        } else {
+            super._transferInput(tokenId, to, amount);
+        }
     }
 }
