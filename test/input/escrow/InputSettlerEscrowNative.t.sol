@@ -125,6 +125,8 @@ contract InputSettlerEscrowNativeTest is InputSettlerEscrowTestBase {
         uint256[2][] memory inputs = new uint256[2][](1);
         inputs[0] = [uint256(uint160(address(token))), NATIVE_AMOUNT];
         StandardOrder memory order = _order(swapper, inputs, 4);
+        vm.prank(swapper);
+        assertTrue(token.approve(inputSettlerEscrow, NATIVE_AMOUNT));
         vm.deal(swapper, 1);
 
         vm.prank(swapper);
@@ -257,7 +259,7 @@ contract InputSettlerEscrowNativeTest is InputSettlerEscrowTestBase {
         vm.deal(address(this), NATIVE_AMOUNT);
 
         // spec-adjudication: FINDINGS #5.
-        vm.expectRevert(InputSettlerEscrow.UserIsZero.selector);
+        vm.expectRevert(InputSettlerBase.UserIsZero.selector);
         IInputSettlerEscrow(inputSettlerEscrow).open{ value: NATIVE_AMOUNT }(order);
     }
 
@@ -267,7 +269,7 @@ contract InputSettlerEscrowNativeTest is InputSettlerEscrowTestBase {
         StandardOrder memory order = _order(address(0), inputs, 15);
 
         // spec-adjudication: FINDINGS #5.
-        vm.expectRevert(InputSettlerEscrow.UserIsZero.selector);
+        vm.expectRevert(InputSettlerBase.UserIsZero.selector);
         IInputSettlerEscrow(inputSettlerEscrow).open(order);
     }
 

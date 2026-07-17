@@ -80,11 +80,6 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
      */
     error NativeTokenNotSupported();
     /**
-     * @dev `order.user` is the zero address. The user is the refund recipient; a zero user would burn refunds.
-     */
-    error UserIsZero();
-
-    /**
      * @notice Emitted when an order is opened.
      * @param orderId The order identifier.
      * @param order The order.
@@ -183,21 +178,10 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
     }
 
     /**
-     * @notice Validates that the order's user is non-zero.
-     * @dev `order.user` is the refund recipient; refunds to the zero address would be burned.
-     */
-    function _validateUser(
-        address user
-    ) internal pure {
-        if (user == address(0)) revert UserIsZero();
-    }
-
-    /**
      * @notice Collect input tokens directly from msg.sender.
-     * @dev Two passes: the first validates identifiers and requires msg.value to equal the sum of native (token 0)
-     * input amounts exactly, before any external call is made; the second pulls the ERC20 inputs. Native inputs are
-     * push-based via msg.value — the exact-equality check makes msg.value the sole funding source, so the contract's
-     * pooled (and force-feedable) ETH balance is never consulted.
+     * @dev Validates identifiers, sums native (token 0) input amounts, and pulls ERC20 inputs. Native inputs are
+     * push-based via msg.value — the exact-equality check after collection makes msg.value the sole funding source,
+     * so the contract's pooled (and force-feedable) ETH balance is never consulted.
      * @param order StandardOrder representing the intent.
      */
     function _open(
@@ -206,25 +190,19 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
         uint256[2][] calldata inputs = order.inputs;
         uint256 numInputs = inputs.length;
 
-        // Pass 1: validate identifiers and establish the exact native value before any external interaction.
         uint256 nativeAmount;
         for (uint256 i = 0; i < numInputs; ++i) {
             uint256[2] calldata input = inputs[i];
             // Reverts on dirty upper bits: token 0 is the only representation of native.
-            input[0].validatedCleanAddress();
-            if (input[0] == 0) {
+            address token = input[0].validatedCleanAddress();
+            if (token == address(0)) {
                 // Checked arithmetic: an overflowing native sum reverts.
                 nativeAmount += input[1];
+            } else {
+                SafeERC20.safeTransferFrom(IERC20(token), msg.sender, address(this), input[1]);
             }
         }
         if (msg.value != nativeAmount) revert InvalidNativeValue(nativeAmount, msg.value);
-
-        // Pass 2: collect the ERC20 inputs.
-        for (uint256 i = 0; i < numInputs; ++i) {
-            uint256[2] calldata input = inputs[i];
-            if (input[0] == 0) continue;
-            SafeERC20.safeTransferFrom(IERC20(input[0].validatedCleanAddress()), msg.sender, address(this), input[1]);
-        }
     }
 
     /**

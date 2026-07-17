@@ -57,6 +57,10 @@ abstract contract InputSettlerBase is EIP712 {
      * @dev Fill deadline is after expiry deadline.
      */
     error FillDeadlineAfterExpiry(uint32 fillDeadline, uint32 expires);
+    /**
+     * @dev `order.user` is the zero address. The user is the refund recipient; a zero user would burn refunds.
+     */
+    error UserIsZero();
 
     /**
      * @notice Emitted when an order is finalised.
@@ -80,6 +84,16 @@ abstract contract InputSettlerBase is EIP712 {
     }
 
     // --- Validation --- //
+
+    /**
+     * @notice Validates that the order's user is non-zero.
+     * @dev `order.user` is the refund recipient; refunds to the zero address would be burned.
+     */
+    function _validateUser(
+        address user
+    ) internal pure {
+        if (user == address(0)) revert UserIsZero();
+    }
 
     /**
      * @notice Checks that a timestamp has not expired.
