@@ -12,6 +12,7 @@ import { OrderPurchase, OrderPurchaseType } from "../../../src/input/types/Order
 import { IInputSettlerCompact } from "../../../src/interfaces/IInputSettlerCompact.sol";
 import { LibAddress } from "../../../src/libs/LibAddress.sol";
 import { MandateOutputEncodingLib } from "../../../src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 import { AlwaysYesOracle } from "../../mocks/AlwaysYesOracle.sol";
 import { MockERC20 } from "../../mocks/MockERC20.sol";
 import { InputSettlerCompactTestBase } from "./InputSettlerCompact.base.t.sol";
@@ -98,7 +99,7 @@ contract InputSettlerCompactTest is InputSettlerCompactTestBase {
 
         assertEq(token.balanceOf(solver), 0);
 
-        bytes memory payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        bytes memory payload = RefEncodingLib.encodeFillDescriptionMemory(
             solverIdentifier,
             IInputSettlerCompact(inputSettlerCompact).orderIdentifier(order),
             uint32(block.timestamp),
@@ -633,7 +634,7 @@ contract InputSettlerCompactTest is InputSettlerCompactTestBase {
         solveParams[0] =
             InputSettlerBase.SolveParams({ solver: solver.toIdentifier(), timestamp: uint32(block.timestamp) });
 
-        bytes memory payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        bytes memory payload = RefEncodingLib.encodeFillDescriptionMemory(
             solver.toIdentifier(), orderId, uint32(block.timestamp), outputs[0]
         );
         bytes32 payloadHash = keccak256(payload);

@@ -10,6 +10,7 @@ import { WormholeOracle } from "../../../src/integrations/oracles/wormhole/Wormh
 import "../../../src/integrations/oracles/wormhole/external/wormhole/Messages.sol";
 import "../../../src/integrations/oracles/wormhole/external/wormhole/Setters.sol";
 import { MandateOutputEncodingLib } from "../../../src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 import { MessageEncodingLib } from "../../../src/libs/MessageEncodingLib.sol";
 import { OutputSettlerSimple } from "../../../src/output/simple/OutputSettlerSimple.sol";
 
@@ -95,7 +96,7 @@ contract WormholeOracleTestSubmit is Test {
 
         bytes memory fillerData = abi.encodePacked(solverIdentifier);
 
-        bytes memory payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        bytes memory payload = RefEncodingLib.encodeFillDescriptionMemory(
             solverIdentifier,
             orderId,
             uint32(block.timestamp),

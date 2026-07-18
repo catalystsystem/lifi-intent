@@ -56,7 +56,7 @@ contract PolymerOracle is BaseInputOracle {
         MandateOutput memory mandateOutput
     ) internal pure returns (bytes32 outputHash) {
         return outputHash =
-            keccak256(MandateOutputEncodingLib.encodeFillDescriptionMemory(solver, orderId, timestamp, mandateOutput));
+            MandateOutputEncodingLib.hashFillDescriptionMemory(solver, orderId, timestamp, mandateOutput);
     }
 
     function _processEvmMessage(
@@ -86,8 +86,7 @@ contract PolymerOracle is BaseInputOracle {
             (MandateOutput memory output, uint32 fillDeadline) = abi.decode(unindexedData, (MandateOutput, uint32));
             OutputVerificationLib._isThisOutputOracle(output.oracle);
 
-            payloadHash =
-                keccak256(MandateOutputEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, output));
+            payloadHash = MandateOutputEncodingLib.hashNotFilledDescriptionMemory(orderId, fillDeadline, output);
         } else {
             revert WrongEventSignature();
         }

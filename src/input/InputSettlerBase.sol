@@ -215,7 +215,7 @@ abstract contract InputSettlerBase is EIP712 {
         uint32 timestamp,
         MandateOutput calldata output
     ) internal pure returns (bytes32 outputHash) {
-        return keccak256(MandateOutputEncodingLib.encodeFillDescription(solver, orderId, timestamp, output));
+        return MandateOutputEncodingLib.hashFillDescription(solver, orderId, timestamp, output);
     }
 
     /**
@@ -236,8 +236,7 @@ abstract contract InputSettlerBase is EIP712 {
         MandateOutput calldata output,
         bytes32 orderId
     ) internal view {
-        bytes32 payloadHash =
-            keccak256(MandateOutputEncodingLib.encodeNotFilledDescription(orderId, fillDeadline, output));
+        bytes32 payloadHash = MandateOutputEncodingLib.hashNotFilledDescription(orderId, fillDeadline, output);
 
         bytes memory proofSeries = abi.encodePacked(output.chainId, output.oracle, output.settler, payloadHash);
         IInputOracle(inputOracle).efficientRequireProven(proofSeries);

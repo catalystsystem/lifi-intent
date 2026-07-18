@@ -8,6 +8,7 @@ import { console2 } from "forge-std/console2.sol";
 import { MandateOutput } from "../../../src/input/types/MandateOutputType.sol";
 import { LibAddress } from "../../../src/libs/LibAddress.sol";
 import { MandateOutputEncodingLib } from "../../../src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 import { MessageEncodingLib } from "../../../src/libs/MessageEncodingLib.sol";
 import { OutputSettlerSimple } from "../../../src/output/simple/OutputSettlerSimple.sol";
 import { MockERC20 } from "../../mocks/MockERC20.sol";
@@ -100,7 +101,7 @@ contract HyperlaneOracleMappedTest is Test {
             context: bytes("")
         });
 
-        payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        payload = RefEncodingLib.encodeFillDescriptionMemory(
             solverIdentifier,
             orderId,
             uint32(block.timestamp),

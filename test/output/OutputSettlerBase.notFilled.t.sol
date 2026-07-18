@@ -6,6 +6,7 @@ import { Test } from "forge-std/Test.sol";
 import { MandateOutput } from "../../src/input/types/MandateOutputType.sol";
 import { LibAddress } from "../../src/libs/LibAddress.sol";
 import { MandateOutputEncodingLib } from "../../src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 import { OutputVerificationLib } from "../../src/libs/OutputVerificationLib.sol";
 import { OutputSettlerBase } from "../../src/output/OutputSettlerBase.sol";
 import { FillerDataLib } from "../../src/output/simple/FillerDataLib.sol";
@@ -74,7 +75,7 @@ contract OutputSettlerBaseNotFilledTest is Test {
         uint32 fillDeadline,
         MandateOutput memory output
     ) internal pure returns (bytes memory) {
-        return MandateOutputEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, output);
+        return RefEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, output);
     }
 
     function _hasAttested(
@@ -292,7 +293,7 @@ contract OutputSettlerBaseNotFilledTest is Test {
         _fill(orderId, output, fillDeadline);
         uint32 fillTimestamp = uint32(block.timestamp);
 
-        bytes memory fillPayload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        bytes memory fillPayload = RefEncodingLib.encodeFillDescriptionMemory(
             filler, orderId, fillTimestamp, output
         );
         assertTrue(_hasAttested(fillPayload));

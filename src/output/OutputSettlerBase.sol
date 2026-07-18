@@ -421,7 +421,7 @@ abstract contract OutputSettlerBase is IAttester, BaseInputOracle {
             revert InvalidAttestation(existingFillRecordHash, givenFillRecordHash);
         }
 
-        bytes32 dataHash = keccak256(MandateOutputEncodingLib.encodeFillDescription(solver, orderId, timestamp, output));
+        bytes32 dataHash = MandateOutputEncodingLib.hashFillDescription(solver, orderId, timestamp, output);
 
         // Check that we set the mapping correctly.
         bytes32 attester = output.settler;

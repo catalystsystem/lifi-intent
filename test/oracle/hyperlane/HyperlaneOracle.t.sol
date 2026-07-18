@@ -8,6 +8,7 @@ import { console2 } from "forge-std/console2.sol";
 import { MandateOutput } from "../../../src/input/types/MandateOutputType.sol";
 import { LibAddress } from "../../../src/libs/LibAddress.sol";
 import { MandateOutputEncodingLib } from "../../../src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 import { MessageEncodingLib } from "../../../src/libs/MessageEncodingLib.sol";
 import { OutputSettlerSimple } from "../../../src/output/simple/OutputSettlerSimple.sol";
 import { MockCallbackExecutor } from "../../mocks/MockCallbackExecutor.sol";
@@ -101,7 +102,7 @@ contract HyperlaneOracleTest is Test {
             context: bytes("")
         });
 
-        payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        payload = RefEncodingLib.encodeFillDescriptionMemory(
             solverIdentifier,
             orderId,
             uint32(block.timestamp),
@@ -177,7 +178,7 @@ contract HyperlaneOracleTest is Test {
             context: bytes("")
         });
 
-        bytes memory payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        bytes memory payload = RefEncodingLib.encodeFillDescriptionMemory(
             solverIdentifier,
             orderId,
             uint32(block.timestamp),
@@ -470,7 +471,7 @@ contract HyperlaneOracleTest is Test {
 
         bytes[] memory payloads = new bytes[](1);
         payloads[0] =
-            MandateOutputEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, outputs[0]);
+            RefEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, outputs[0]);
 
         // Before the deadline the live validation rejects the non-fill.
         vm.expectRevert(abi.encodeWithSignature("NotAllPayloadsValid()"));

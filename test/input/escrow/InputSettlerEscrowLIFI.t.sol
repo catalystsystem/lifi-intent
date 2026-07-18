@@ -6,6 +6,7 @@ import { InputSettlerBase } from "OIF/src/input/InputSettlerBase.sol";
 
 import { StandardOrder } from "OIF/src/input/types/StandardOrderType.sol";
 import { MandateOutput, MandateOutputEncodingLib } from "OIF/src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 
 import { InputSettlerEscrowTest } from "OIF/test/input/escrow/InputSettlerEscrow.t.sol";
 
@@ -57,7 +58,7 @@ contract inputSettlerEscrowTestBaseLIFI is InputSettlerEscrowTest {
                 output.oracle,
                 output.settler,
                 keccak256(
-                    MandateOutputEncodingLib.encodeFillDescriptionMemory(
+                    RefEncodingLib.encodeFillDescriptionMemory(
                         bytes32(uint256(uint160(callerOfContract))),
                         orderId,
                         uint32(block.timestamp),
@@ -133,7 +134,11 @@ contract inputSettlerEscrowTestBaseLIFI is InputSettlerEscrowTest {
         vm.assume(fee <= MAX_GOVERNANCE_FEE);
         vm.prank(owner);
         InputSettlerEscrowLIFI(inputSettlerEscrow).setGovernanceFee(fee);
-        vm.warp(uint32(block.timestamp) + GOVERNANCE_FEE_CHANGE_DELAY + 1);
+        // Compute the warp target explicitly and reuse it for the expected payload and solve params. Reading
+        // `block.timestamp` AFTER `vm.warp` is unsafe: via-IR can cache the pre-warp value across the cheatcode
+        // (see the note in test_refunds_waive_governance_fee), desyncing the expected fill hash from finalise's.
+        uint32 fillTimestamp = uint32(block.timestamp + GOVERNANCE_FEE_CHANGE_DELAY + 1);
+        vm.warp(fillTimestamp);
         InputSettlerEscrowLIFI(inputSettlerEscrow).applyGovernanceFee();
 
         uint256 amount = 1e18 / 10;
@@ -171,8 +176,8 @@ contract inputSettlerEscrowTestBaseLIFI is InputSettlerEscrowTest {
         InputSettlerEscrowLIFI(inputSettlerEscrow).open(order);
 
         bytes32 orderId = InputSettlerEscrowLIFI(inputSettlerEscrow).orderIdentifier(order);
-        bytes memory payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
-            bytes32(uint256(uint160((solver)))), orderId, uint32(block.timestamp), outputs[0]
+        bytes memory payload = RefEncodingLib.encodeFillDescriptionMemory(
+            bytes32(uint256(uint160((solver)))), orderId, fillTimestamp, outputs[0]
         );
         bytes32 payloadHash = keccak256(payload);
 
@@ -188,7 +193,7 @@ contract inputSettlerEscrowTestBaseLIFI is InputSettlerEscrowTest {
 
         InputSettlerBase.SolveParams[] memory solveParams = new InputSettlerBase.SolveParams[](1);
         solveParams[0] = InputSettlerBase.SolveParams({
-            timestamp: uint32(block.timestamp), solver: bytes32(uint256(uint160((solver))))
+            timestamp: fillTimestamp, solver: bytes32(uint256(uint160((solver))))
         });
 
         vm.prank(solver);

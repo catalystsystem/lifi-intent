@@ -11,6 +11,7 @@ import { CitreaOracle, ICitrea } from "../../../src/integrations/oracles/bitcoin
 
 import { WormholeOracle } from "../../../src/integrations/oracles/wormhole/WormholeOracle.sol";
 import { MandateOutput, MandateOutputEncodingLib } from "../../../src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 
 import { MockERC20 } from "../../mocks/MockERC20.sol";
 import { ExportedMessages } from "../wormhole/WormholeOracle.submit.t.sol";
@@ -980,7 +981,7 @@ contract CitreaOracleTest is Test {
 
         // Output oracle (as filler)
         bytes memory payload =
-            MandateOutputEncodingLib.encodeFillDescriptionMemory(solver, orderId, uint32(BLOCK_TIME), output);
+            RefEncodingLib.encodeFillDescriptionMemory(solver, orderId, uint32(BLOCK_TIME), output);
         bytes[] memory payloads = new bytes[](1);
         payloads[0] = payload;
         bool fillerValid = citreaOracle.hasAttested(payloads);
@@ -1052,7 +1053,7 @@ contract CitreaOracleTest is Test {
         }
         // Input Oracle (as oracle)
         bytes memory payload =
-            MandateOutputEncodingLib.encodeFillDescriptionMemory(solver, orderId, uint32(BLOCK_TIME), output);
+            RefEncodingLib.encodeFillDescriptionMemory(solver, orderId, uint32(BLOCK_TIME), output);
         bool oracleValid =
             citreaOracle.isProven(block.chainid, citreaOracleBytes32, citreaOracleBytes32, keccak256(payload));
         assertEq(oracleValid, true);
@@ -1136,7 +1137,7 @@ contract CitreaOracleTest is Test {
 
         // Output oracle (as filler)
         bytes memory payload =
-            MandateOutputEncodingLib.encodeFillDescriptionMemory(solver, orderId, uint32(BLOCK_TIME), output);
+            RefEncodingLib.encodeFillDescriptionMemory(solver, orderId, uint32(BLOCK_TIME), output);
         bytes[] memory payloads = new bytes[](1);
         payloads[0] = payload;
         bool fillerValid = citreaOracle.hasAttested(payloads);
@@ -1200,7 +1201,7 @@ contract CitreaOracleTest is Test {
 
         // Input Oracle (as oracle)
         bytes memory payload =
-            MandateOutputEncodingLib.encodeFillDescriptionMemory(solver, orderId, uint32(BLOCK_TIME), output);
+            RefEncodingLib.encodeFillDescriptionMemory(solver, orderId, uint32(BLOCK_TIME), output);
         bool oracleValid =
             citreaOracle.isProven(block.chainid, citreaOracleBytes32, citreaOracleBytes32, keccak256(payload));
         assertEq(oracleValid, true);
@@ -1351,7 +1352,7 @@ contract CitreaOracleTest is Test {
 
         // Output oracle (as filler)
         bytes memory payload =
-            MandateOutputEncodingLib.encodeFillDescriptionMemory(solver, orderId, uint32(BLOCK_TIME), output);
+            RefEncodingLib.encodeFillDescriptionMemory(solver, orderId, uint32(BLOCK_TIME), output);
         bytes[] memory payloads = new bytes[](1);
         payloads[0] = payload;
         bool fillerValid = citreaOracle.hasAttested(payloads);
@@ -1408,7 +1409,7 @@ contract CitreaOracleTest is Test {
 
         // Input Oracle (as oracle)
         bytes memory payload =
-            MandateOutputEncodingLib.encodeFillDescriptionMemory(solver, orderId, uint32(BLOCK_TIME), output);
+            RefEncodingLib.encodeFillDescriptionMemory(solver, orderId, uint32(BLOCK_TIME), output);
         bool oracleValid =
             citreaOracle.isProven(block.chainid, citreaOracleBytes32, citreaOracleBytes32, keccak256(payload));
         assertEq(oracleValid, true);
@@ -1559,7 +1560,7 @@ contract CitreaOracleTest is Test {
 
         // Output oracle (as filler)
         bytes memory payload =
-            MandateOutputEncodingLib.encodeFillDescriptionMemory(solver, orderId, uint32(PREV_BLOCK_TIME), output);
+            RefEncodingLib.encodeFillDescriptionMemory(solver, orderId, uint32(PREV_BLOCK_TIME), output);
         bytes[] memory payloads = new bytes[](1);
         payloads[0] = payload;
         bool fillerValid = citreaOracle.hasAttested(payloads);
@@ -1657,7 +1658,7 @@ contract CitreaOracleTest is Test {
 
         // Output oracle (as filler)
         bytes memory payload =
-            MandateOutputEncodingLib.encodeFillDescriptionMemory(solver, orderId, uint32(BLOCK_TIME), output);
+            RefEncodingLib.encodeFillDescriptionMemory(solver, orderId, uint32(BLOCK_TIME), output);
         bytes[] memory payloads = new bytes[](1);
         payloads[0] = payload;
         bool fillerValid = citreaOracle.hasAttested(payloads);

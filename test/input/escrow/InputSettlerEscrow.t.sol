@@ -9,6 +9,7 @@ import { StandardOrder } from "../../../src/input/types/StandardOrderType.sol";
 import { IInputSettlerEscrow } from "../../../src/interfaces/IInputSettlerEscrow.sol";
 import { LibAddress } from "../../../src/libs/LibAddress.sol";
 import { MandateOutputEncodingLib } from "../../../src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 
 import { InputSettlerBase } from "../../../src/input/InputSettlerBase.sol";
 import { InputSettlerPurchase } from "../../../src/input/InputSettlerPurchase.sol";
@@ -517,7 +518,7 @@ contract InputSettlerEscrowTest is InputSettlerEscrowTestBase {
             output.chainId,
             output.oracle,
             output.settler,
-            keccak256(MandateOutputEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, output))
+            keccak256(RefEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, output))
         );
     }
 
@@ -647,7 +648,7 @@ contract InputSettlerEscrowTest is InputSettlerEscrowTestBase {
             output.oracle,
             output.settler,
             keccak256(
-                MandateOutputEncodingLib.encodeFillDescriptionMemory(
+                RefEncodingLib.encodeFillDescriptionMemory(
                     solver.toIdentifier(), orderId, fillDeadline, output
                 )
             )
@@ -780,7 +781,7 @@ contract InputSettlerEscrowTest is InputSettlerEscrowTestBase {
         assertEq(token.balanceOf(solver), 0);
 
         bytes32 orderId = IInputSettlerEscrow(inputSettlerEscrow).orderIdentifier(order);
-        bytes memory payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        bytes memory payload = RefEncodingLib.encodeFillDescriptionMemory(
             solver.toIdentifier(), orderId, uint32(block.timestamp), outputs[0]
         );
         bytes32 payloadHash = keccak256(payload);
@@ -901,7 +902,7 @@ contract InputSettlerEscrowTest is InputSettlerEscrowTestBase {
 
         bytes32 orderId = IInputSettlerEscrow(inputSettlerEscrow).orderIdentifier(order);
         {
-            bytes memory payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+            bytes memory payload = RefEncodingLib.encodeFillDescriptionMemory(
                 solver.toIdentifier(), orderId, uint32(block.timestamp), outputs[0]
             );
             bytes32 payloadHash = keccak256(payload);

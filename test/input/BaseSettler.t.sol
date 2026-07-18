@@ -13,6 +13,7 @@ import { OrderPurchase, OrderPurchaseType } from "../../src/input/types/OrderPur
 import { StandardOrder } from "../../src/input/types/StandardOrderType.sol";
 import { LibAddress } from "../../src/libs/LibAddress.sol";
 import { MandateOutputEncodingLib } from "../../src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 import { EIP712 } from "openzeppelin/utils/cryptography/EIP712.sol";
 
 contract MockSettler is InputSettlerPurchase {
@@ -158,7 +159,7 @@ contract BaseInputSettlerTest is Test {
                 MandateOutputs[i].oracle,
                 MandateOutputs[i].settler,
                 keccak256(
-                    MandateOutputEncodingLib.encodeFillDescriptionMemory(
+                    RefEncodingLib.encodeFillDescriptionMemory(
                         solverIdentifier, orderId, solveParams[i].timestamp, MandateOutputs[i]
                     )
                 )
@@ -245,7 +246,7 @@ contract BaseInputSettlerTest is Test {
                 MandateOutputs[i].oracle,
                 MandateOutputs[i].settler,
                 keccak256(
-                    MandateOutputEncodingLib.encodeFillDescriptionMemory(
+                    RefEncodingLib.encodeFillDescriptionMemory(
                         solveParams[i].solver, orderId, solveParams[i].timestamp, MandateOutputs[i]
                     )
                 )

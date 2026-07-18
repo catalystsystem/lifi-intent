@@ -17,6 +17,7 @@ import { InputSettlerEscrow } from "src/input/escrow/InputSettlerEscrow.sol";
 import { StandardOrder } from "src/input/types/StandardOrderType.sol";
 import { IInputSettlerEscrow } from "src/interfaces/IInputSettlerEscrow.sol";
 import { MandateOutputEncodingLib } from "src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 import { OutputSettlerBase } from "src/output/OutputSettlerBase.sol";
 import { OutputSettlerSimple } from "src/output/simple/OutputSettlerSimple.sol";
 
@@ -98,7 +99,7 @@ contract PolymerOracleTest is Test {
             mockCrossL2ProverV2.generateAndEmitProof(remoteChainId, makeAddr("settler"), topics, unindexedData);
 
         bytes32 expectedPayloadHash = keccak256(
-            MandateOutputEncodingLib.encodeFillDescriptionMemory(
+            RefEncodingLib.encodeFillDescriptionMemory(
                 solver.toIdentifier(), orderId, timestamp, mandateOutput
             )
         );
@@ -141,7 +142,7 @@ contract PolymerOracleTest is Test {
             mockCrossL2ProverV2.generateAndEmitProof(remoteChainId1, makeAddr("settler"), topics, unindexedData);
 
         bytes32 expectedPayloadHash1 = keccak256(
-            MandateOutputEncodingLib.encodeFillDescriptionMemory(
+            RefEncodingLib.encodeFillDescriptionMemory(
                 solver.toIdentifier(), orderId1, timestamp, mandateOutput
             )
         );
@@ -152,7 +153,7 @@ contract PolymerOracleTest is Test {
             mockCrossL2ProverV2.generateAndEmitProof(remoteChainId2, makeAddr("settler"), topics, unindexedData);
 
         bytes32 expectedPayloadHash2 = keccak256(
-            MandateOutputEncodingLib.encodeFillDescriptionMemory(
+            RefEncodingLib.encodeFillDescriptionMemory(
                 solver.toIdentifier(), orderId2, timestamp, mandateOutput
             )
         );
@@ -205,7 +206,7 @@ contract PolymerOracleTest is Test {
         );
 
         bytes32 expectedPayloadHash =
-            keccak256(MandateOutputEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, output));
+            keccak256(RefEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, output));
 
         vm.expectEmit();
         emit OutputProven(
@@ -325,7 +326,7 @@ contract PolymerOracleTest is Test {
         );
 
         bytes32 payloadHash =
-            keccak256(MandateOutputEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, outputs[0]));
+            keccak256(RefEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, outputs[0]));
         vm.expectEmit();
         emit OutputProven(
             block.chainid, address(polymerOracle).toIdentifier(), address(outputSettler).toIdentifier(), payloadHash
@@ -464,7 +465,7 @@ contract PolymerOracleTest is Test {
         assertEq(token.balanceOf(solver), 0);
 
         bytes32 orderId = IInputSettlerEscrow(inputSettlerEscrow).orderIdentifier(order);
-        bytes memory payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        bytes memory payload = RefEncodingLib.encodeFillDescriptionMemory(
             solver.toIdentifier(), orderId, uint32(block.timestamp), outputs[0]
         );
         bytes32 payloadHash = keccak256(payload);

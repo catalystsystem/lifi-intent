@@ -77,7 +77,10 @@ contract InputSettlerCompactLIFITest is InputSettlerCompactTest {
         vm.assume(fee <= MAX_GOVERNANCE_FEE);
         vm.prank(owner);
         InputSettlerCompactLIFI(inputSettlerCompact).setGovernanceFee(fee);
-        vm.warp(uint32(block.timestamp) + GOVERNANCE_FEE_CHANGE_DELAY + 1);
+        // Warp target computed before the warp and reused for solve params; reading block.timestamp after vm.warp
+        // is unsafe under via-IR (see InputSettlerEscrowLIFI.t.sol).
+        uint32 fillTimestamp = uint32(block.timestamp + GOVERNANCE_FEE_CHANGE_DELAY + 1);
+        vm.warp(fillTimestamp);
         InputSettlerCompactLIFI(inputSettlerCompact).applyGovernanceFee();
 
         uint256 amount = 1e18 / 10;
@@ -128,7 +131,7 @@ contract InputSettlerCompactLIFITest is InputSettlerCompactTest {
 
         InputSettlerBase.SolveParams[] memory solveParams = new InputSettlerBase.SolveParams[](1);
         solveParams[0] = InputSettlerBase.SolveParams({
-            solver: bytes32(uint256(uint160((solver)))), timestamp: uint32(block.timestamp)
+            solver: bytes32(uint256(uint160((solver)))), timestamp: fillTimestamp
         });
 
         vm.prank(solver);
