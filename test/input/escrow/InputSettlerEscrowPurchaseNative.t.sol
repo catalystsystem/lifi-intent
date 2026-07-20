@@ -7,7 +7,7 @@ pragma solidity ^0.8.26;
 import { InputSettlerBase } from "../../../src/input/InputSettlerBase.sol";
 import { InputSettlerPurchase } from "../../../src/input/InputSettlerPurchase.sol";
 import { InputSettlerEscrow } from "../../../src/input/escrow/InputSettlerEscrow.sol";
-import { InputSettlerEscrowTron } from "../../../src/input/escrow/InputSettlerEscrowTron.sol";
+import { InputSettlerEscrowLIFITron } from "../../../src/input/escrow/InputSettlerEscrowLIFI.tron.sol";
 import { MandateOutput } from "../../../src/input/types/MandateOutputType.sol";
 import { OrderPurchase, OrderPurchaseType } from "../../../src/input/types/OrderPurchaseType.sol";
 import { StandardOrder } from "../../../src/input/types/StandardOrderType.sol";
@@ -251,7 +251,7 @@ contract InputSettlerEscrowPurchaseNativeTest is InputSettlerEscrowTestBase {
     }
 
     function test_tron_native_open_and_purchase_succeeds() public {
-        InputSettlerEscrowTron tronSettler = new InputSettlerEscrowTron(address(0));
+        InputSettlerEscrowLIFITron tronSettler = new InputSettlerEscrowLIFITron(address(this));
         StandardOrder memory order = _nativeOrder(NATIVE_AMOUNT, 9);
         vm.deal(swapper, NATIVE_AMOUNT);
         vm.prank(swapper);

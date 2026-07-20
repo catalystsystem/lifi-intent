@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.26;
 
-import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
-
 import { InputSettlerEscrow } from "OIF/src/input/escrow/InputSettlerEscrow.sol";
 import { MandateOutput } from "OIF/src/input/types/MandateOutputType.sol";
 import { StandardOrder, StandardOrderType } from "OIF/src/input/types/StandardOrderType.sol";
@@ -238,9 +236,5 @@ contract InputSettlerEscrowLIFI is InputSettlerEscrow, GovernanceFee {
 
             _sendInputAsset(tokenId, destination, amount);
         }
-    }
-
-    function _transfer(address token, address to, uint256 amount) internal virtual override {
-        SafeTransferLib.safeTransfer(token, to, amount);
     }
 }

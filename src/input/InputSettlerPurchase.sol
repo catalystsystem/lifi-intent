@@ -3,9 +3,6 @@ pragma solidity ^0.8.26;
 
 import { LibAddress } from "../libs/LibAddress.sol";
 
-import { IERC20 } from "openzeppelin/token/ERC20/IERC20.sol";
-import { SafeERC20 } from "openzeppelin/token/ERC20/utils/SafeERC20.sol";
-
 import { SignatureChecker } from "openzeppelin/utils/cryptography/SignatureChecker.sol";
 
 import { IInputCallback } from "../interfaces/IInputCallback.sol";
@@ -61,7 +58,6 @@ import { InputSettlerBase } from "./InputSettlerBase.sol";
 abstract contract InputSettlerPurchase is InputSettlerBase {
     using LibAddress for address;
     using LibAddress for bytes32;
-    using LibAddress for uint256;
 
     /**
      * @dev The order has already been purchased.
@@ -198,7 +194,7 @@ abstract contract InputSettlerPurchase is InputSettlerBase {
                 uint256 allocatedAmount = input[1];
                 uint256 amountAfterDiscount = (allocatedAmount * (DISCOUNT_DENOM - discount)) / DISCOUNT_DENOM;
                 // Throws if discount > DISCOUNT_DENOM => DISCOUNT_DENOM - discount < 0;
-                _transferInput(tokenId, newDestination, amountAfterDiscount);
+                _transferFromSender(tokenId, newDestination, amountAfterDiscount);
             }
             // Emit the event now because of stack issues.
             emit OrderPurchased(orderPurchase.orderId, cleanSolver, purchaser);
@@ -210,16 +206,11 @@ abstract contract InputSettlerPurchase is InputSettlerBase {
     }
 
     /**
-     * @notice Transfers an input token to a destination.
+     * @notice Transfers an input token (the purchase price) to a destination.
+     * @dev Implemented by each input settler to handle its supported asset classes.
      * @param tokenId The token identifier.
      * @param to The destination to transfer the input to.
      * @param amount The amount of the input to transfer.
      */
-    function _transferInput(
-        uint256 tokenId,
-        address to,
-        uint256 amount
-    ) internal virtual {
-        SafeERC20.safeTransferFrom(IERC20(tokenId.validatedCleanAddress()), msg.sender, to, amount);
-    }
+    function _transferFromSender(uint256 tokenId, address to, uint256 amount) internal virtual;
 }

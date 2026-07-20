@@ -595,11 +595,8 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
     }
 
     /**
-     * @dev Pays out a single escrowed input, native or ERC20. Non-virtual on purpose: the token 0 branch must not be
-     * bypassable by `_transfer` overrides (an ERC20-only override handed token 0 could "succeed" without moving
-     * funds). Native payouts are push-only — a rejecting recipient reverts the whole resolution; for refunds this
-     * means a reverting `order.user` blocks its own refund. Zero-amount native payouts are skipped so a recipient
-     * without a receive function cannot block an otherwise valueless leg.
+     * @dev Pays out a single escrowed input, native or ERC20. A recipient rejecting a native transfer would block the
+     * path until fixed; a user cannot be refunded their inputs.
      * @param tokenId The input token identifier; 0 is native ETH.
      * @param destination The recipient of the asset.
      * @param amount The amount to transfer.
@@ -613,9 +610,7 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
     }
 
     /**
-     * @dev Pays out a single escrowed ERC20 input. Virtual so subclasses can customise the outbound transfer for
-     * non-standard tokens (e.g. {InputSettlerEscrowTron} for TRON USDT, whose `transfer` returns `false` on success).
-     * Never called with the native sentinel; token 0 is handled by {_sendInputAsset}.
+     * @dev Pays out a single escrowed ERC20 input.
      * @param token The input token to transfer.
      * @param destination The recipient of the tokens.
      * @param amount The amount to transfer.
@@ -626,6 +621,20 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
         uint256 amount
     ) internal virtual {
         SafeERC20.safeTransfer(IERC20(token), destination, amount);
+    }
+
+    /**
+     * @inheritdoc InputSettlerPurchase
+     * @dev Native transfers have to be validated against msg.value before this function is called.
+     */
+    function _transferFromSender(uint256 tokenId, address to, uint256 amount) internal virtual override {
+        if (tokenId == 0) {
+            // The exact-value guard makes msg.value, rather than pooled escrow, the source of this payment.
+            // forge-lint: disable-next-line(arbitrary-send-eth)
+            Address.sendValue(payable(to), amount);
+        } else {
+            SafeERC20.safeTransferFrom(IERC20(tokenId.validatedCleanAddress()), msg.sender, to, amount);
+        }
     }
 
     // --- Purchase Order --- //
@@ -680,20 +689,5 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
             }
         }
         if (msg.value != nativeAmount) revert InvalidNativeValue(nativeAmount, msg.value);
-    }
-
-    /**
-     * @inheritdoc InputSettlerPurchase
-     * @dev Native purchase funds are pushed from the exact msg.value validated before {_purchaseOrder}; ERC20 funds
-     * remain pull-based from msg.sender. Zero-value native sends are skipped for recipients without a receive hook.
-     */
-    function _transferInput(uint256 tokenId, address to, uint256 amount) internal virtual override {
-        if (tokenId == 0) {
-            // The exact-value guard makes msg.value, rather than pooled escrow, the source of this payment.
-            // forge-lint: disable-next-line(arbitrary-send-eth)
-            if (amount > 0) Address.sendValue(payable(to), amount);
-        } else {
-            super._transferInput(tokenId, to, amount);
-        }
     }
 }
