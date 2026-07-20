@@ -8,7 +8,7 @@ import { Base64 } from "openzeppelin/utils/Base64.sol";
 import { MandateOutput } from "src/input/types/MandateOutputType.sol";
 import { PolymerOracle } from "src/integrations/oracles/polymer/PolymerOracle.sol";
 import { PolymerOracleMapped } from "src/integrations/oracles/polymer/PolymerOracleMapped.sol";
-import { MockCrossL2ProverV2 } from "src/integrations/oracles/polymer/external/mocks/MockCrossL2ProverV2.sol";
+import { MockCrossL2ProverV2 } from "test/mocks/MockCrossL2ProverV2.sol";
 import { LibAddress } from "src/libs/LibAddress.sol";
 
 import { MockERC20 } from "../../mocks/MockERC20.sol";
@@ -343,19 +343,17 @@ contract PolymerOracleMappedTest is Test {
     /// @dev Helper to build a single Solana log entry in the real Polymer format consumed by `PolymerOracle`'s
     ///      Solana path (`receiveSolanaMessage`).
     ///
-    ///      `validateSolLogs` returns each log as a human-readable string of the form
-    ///      `"program: <base58 program id>, <base64 blob>"`. The oracle extracts the trailing base64 blob and decodes
-    ///      it under layout: `application (32) || payload (dynamic)`. The sender identity is taken from the
-    ///      prover-authenticated `programID` (NOT from log content); the oracle attests over
+    ///      `validateSolLogs` returns each log as the raw `base64(application(32) || payload(dynamic))` blob (Polymer
+    ///      strips the `"Prove: program: <id>, "` template off-chain). The oracle decodes the whole log. The sender
+    ///      identity is taken from the prover-authenticated `programID` (NOT from log content); the oracle attests over
     ///      `payloadHash = keccak256(payload)` and stores it under
     ///      `_attestations[remoteChainId][programID][application][payloadHash] = true`.
     function _encodeSolanaLog(
-        bytes32 programId,
         bytes32 application,
         bytes memory payload
     ) internal view returns (string memory) {
         bytes memory blob = abi.encodePacked(application, payload);
-        return mockCrossL2ProverV2.formatSolLogMessage(programId, blob);
+        return mockCrossL2ProverV2.formatSolLogMessage(blob);
     }
 
     function test_receiveSolanaMessage_with_proof_mapped() public {
@@ -366,7 +364,7 @@ contract PolymerOracleMappedTest is Test {
         bytes32 payloadHash = keccak256(payload);
 
         string[] memory logMessages = new string[](1);
-        logMessages[0] = _encodeSolanaLog(programID, application, payload);
+        logMessages[0] = _encodeSolanaLog(application, payload);
 
         bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
 
@@ -383,10 +381,41 @@ contract PolymerOracleMappedTest is Test {
         assertTrue(polymerOracleMapped.isProven(remoteChainId, programID, application, payloadHash));
     }
 
-    /// @dev GOLDEN fixture (mapped variant). Immutable literals computed OFFLINE from the documented wire format
-    ///      `"program: <base58 program id>, <base64(source(32) || payload)>"`, independent of the mock's
-    ///      `formatSolLogMessage`. Pins the exact bytes the shipped oracle must accept and the attestation slot it
-    ///      must set for the Polymer-authenticated program id. See PolymerOracle.t.sol for the fixture derivation.
+    /// @dev Proves `_getChainId` is actually applied on the Solana path: Solana protocol id 2 is mapped to a DISTINCT
+    ///      canonical id, and the attestation must land under the canonical id, not the raw protocol id. An
+    ///      implementation that forgot to map would write under 2 and fail here.
+    function test_receiveSolanaMessage_maps_to_distinct_canonical_id() public {
+        uint32 solanaProtocolId = 2;
+        uint256 canonicalChainId = 424_242;
+        bytes32 programID = keccak256("solana-program");
+        bytes32 application = makeAddr("settler").toIdentifier();
+        bytes memory payload = bytes("test-payload");
+        bytes32 payloadHash = keccak256(payload);
+
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = _encodeSolanaLog(application, payload);
+
+        bytes memory mockProof =
+            mockCrossL2ProverV2.generateAndEmitSolProof(solanaProtocolId, programID, logMessages);
+
+        vm.prank(owner);
+        polymerOracleMapped.setChainMap(uint256(solanaProtocolId), canonicalChainId);
+
+        // Emitted + stored under the mapped canonical id.
+        vm.expectEmit();
+        emit OutputProven(canonicalChainId, programID, application, payloadHash);
+        polymerOracleMapped.receiveSolanaMessage(mockProof);
+
+        assertTrue(polymerOracleMapped.isProven(canonicalChainId, programID, application, payloadHash));
+        // NOT stored under the raw Solana protocol id.
+        assertFalse(polymerOracleMapped.isProven(uint256(solanaProtocolId), programID, application, payloadHash));
+    }
+
+    /// @dev GOLDEN fixture (mapped variant). Immutable literals computed OFFLINE from the real Polymer wire format: the
+    ///      returned log is exactly `base64(application(32) || payload)` (no program-id prefix; Polymer strips it),
+    ///      independent of the mock's `formatSolLogMessage`. Pins the exact bytes the shipped oracle must accept and the
+    ///      attestation slot it must set for the Polymer-authenticated program id. See PolymerOracle.t.sol for the
+    ///      fixture derivation.
     function test_receiveSolanaMessage_golden_fixture_mapped() public {
         uint32 solanaChainId = 2;
 
@@ -396,8 +425,7 @@ contract PolymerOracleMappedTest is Test {
         bytes32 payloadHash = 0x11d41300e405124d7e79e9a507b5abe013e238cf350fbf90a46fcca903614473;
 
         string[] memory logMessages = new string[](1);
-        logMessages[0] =
-            "program: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA, AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAN6tvu9nb2xkZW4tcGF5bG9hZA==";
+        logMessages[0] = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAN6tvu9nb2xkZW4tcGF5bG9hZA==";
 
         bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
 
@@ -426,8 +454,8 @@ contract PolymerOracleMappedTest is Test {
 
         // Two logs within a SINGLE proof.
         string[] memory logMessages = new string[](2);
-        logMessages[0] = _encodeSolanaLog(programID, application1, payload1);
-        logMessages[1] = _encodeSolanaLog(programID, application2, payload2);
+        logMessages[0] = _encodeSolanaLog(application1, payload1);
+        logMessages[1] = _encodeSolanaLog(application2, payload2);
 
         bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
 
@@ -458,10 +486,10 @@ contract PolymerOracleMappedTest is Test {
         bytes32 payloadHash2 = keccak256(payload2);
 
         string[] memory logMessages1 = new string[](1);
-        logMessages1[0] = _encodeSolanaLog(programID, application1, payload1);
+        logMessages1[0] = _encodeSolanaLog(application1, payload1);
 
         string[] memory logMessages2 = new string[](1);
-        logMessages2[0] = _encodeSolanaLog(programID, application2, payload2);
+        logMessages2[0] = _encodeSolanaLog(application2, payload2);
 
         bytes memory mockProof1 = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages1);
         bytes memory mockProof2 = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages2);
@@ -493,10 +521,10 @@ contract PolymerOracleMappedTest is Test {
         bytes32 payloadHash2 = keccak256(payload2);
 
         string[] memory logMessages1 = new string[](1);
-        logMessages1[0] = _encodeSolanaLog(programID, application1, payload1);
+        logMessages1[0] = _encodeSolanaLog(application1, payload1);
 
         string[] memory logMessages2 = new string[](1);
-        logMessages2[0] = _encodeSolanaLog(programID, application2, payload2);
+        logMessages2[0] = _encodeSolanaLog(application2, payload2);
 
         bytes memory mockProof1 = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages1);
         bytes memory mockProof2 = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages2);
@@ -525,7 +553,7 @@ contract PolymerOracleMappedTest is Test {
         bytes memory payload = bytes("test-payload");
 
         string[] memory logMessages = new string[](1);
-        logMessages[0] = _encodeSolanaLog(programID, application, payload);
+        logMessages[0] = _encodeSolanaLog(application, payload);
 
         bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(wrongChainId, programID, logMessages);
 
@@ -535,9 +563,9 @@ contract PolymerOracleMappedTest is Test {
     }
 
     /// @dev CRITICAL regression: a proof from an attacker-deployed program cannot forge an attestation for a victim's
-    ///      trusted oracle. With the enforced program-id binding the attacker can only name (and be authenticated as)
-    ///      their own program in the log, so the forged attestation lands in the attacker's own slot and is invisible
-    ///      to any honest order that references the real program id.
+    ///      trusted oracle. Polymer binds every returned log to the authenticated program id, so an attacker's proof is
+    ///      authenticated as their own program; the forged attestation lands in the attacker's own slot and is
+    ///      invisible to any honest order that references the real program id.
     function test_receiveSolanaMessage_forged_program_self_namespaces() public {
         uint32 solanaChainId = 2;
         bytes32 victimProgramID = keccak256("victim-solana-program");
@@ -547,9 +575,9 @@ contract PolymerOracleMappedTest is Test {
         bytes memory payload = bytes("release-funds");
         bytes32 payloadHash = keccak256(payload);
 
-        // The attacker can only produce a log naming their own program (the in-log id must equal the authenticated id).
+        // The attacker's proof can only be authenticated as their own program id (Polymer binds returned logs to it).
         string[] memory logMessages = new string[](1);
-        logMessages[0] = _encodeSolanaLog(attackerProgramID, application, payload);
+        logMessages[0] = _encodeSolanaLog(application, payload);
 
         // The prover authenticates the emitting program as the attacker's program.
         bytes memory mockProof =
@@ -570,43 +598,15 @@ contract PolymerOracleMappedTest is Test {
         assertTrue(polymerOracleMapped.isProven(remoteChainId, attackerProgramID, application, payloadHash));
     }
 
-    /// @dev CRITICAL regression for Finding 1 (mapped variant): a log whose embedded program id does NOT equal the
-    ///      Polymer-authenticated `returnedProgramId` MUST revert. Tested in both directions.
-    function test_receiveSolanaMessage_program_id_mismatch_reverts_mapped() public {
-        uint32 solanaChainId = 2;
-        bytes32 victimProgramID = keccak256("victim-solana-program");
-        bytes32 attackerProgramID = keccak256("attacker-solana-program");
-        bytes32 application = makeAddr("settler").toIdentifier();
-        bytes memory payload = bytes("release-funds");
-
-        uint256 remoteChainId = uint256(solanaChainId);
-        vm.prank(owner);
-        polymerOracleMapped.setChainMap(remoteChainId, remoteChainId);
-
-        // Direction 1: authenticated as victim, but the log names the attacker's program.
-        string[] memory logMessages = new string[](1);
-        logMessages[0] = _encodeSolanaLog(attackerProgramID, application, payload);
-        bytes memory proof1 = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, victimProgramID, logMessages);
-        vm.expectRevert(PolymerOracle.SolanaProgramIdMismatch.selector);
-        polymerOracleMapped.receiveSolanaMessage(proof1);
-
-        // Direction 2: authenticated as attacker, but the log names the victim's program.
-        logMessages[0] = _encodeSolanaLog(victimProgramID, application, payload);
-        bytes memory proof2 =
-            mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, attackerProgramID, logMessages);
-        vm.expectRevert(PolymerOracle.SolanaProgramIdMismatch.selector);
-        polymerOracleMapped.receiveSolanaMessage(proof2);
-    }
-
-    function test_receiveSolanaMessage_malformed_log_missing_prefix_reverts() public {
+    /// @dev A returned log that is not valid base64 fails closed (mapped variant): `Base64.decode` reverts on any
+    ///      non-base64 character. Post-fix a raw base64 blob is the happy path; only malformed content fails.
+    function test_receiveSolanaMessage_malformed_base64_reverts_mapped() public {
         uint32 solanaChainId = 2;
         bytes32 programID = keccak256("solana-program");
-        bytes32 application = makeAddr("settler").toIdentifier();
-        bytes memory payload = bytes("test-payload");
 
-        // A raw base64 blob with no `"program: <base58>, "` wrapper: the authenticated prefix is absent.
+        // '@' (0x40) is outside the base64 alphabet.
         string[] memory logMessages = new string[](1);
-        logMessages[0] = Base64.encode(abi.encodePacked(application, payload));
+        logMessages[0] = "@@@@";
 
         bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
 
@@ -614,7 +614,7 @@ contract PolymerOracleMappedTest is Test {
         vm.prank(owner);
         polymerOracleMapped.setChainMap(remoteChainId, remoteChainId);
 
-        vm.expectRevert(PolymerOracle.SolanaProgramIdMismatch.selector);
+        vm.expectRevert(abi.encodeWithSelector(Base64.InvalidBase64Char.selector, bytes1("@")));
         polymerOracleMapped.receiveSolanaMessage(mockProof);
     }
 
@@ -625,7 +625,7 @@ contract PolymerOracleMappedTest is Test {
         bytes32 application = makeAddr("settler").toIdentifier();
 
         string[] memory logMessages = new string[](1);
-        logMessages[0] = mockCrossL2ProverV2.formatSolLogMessage(programID, abi.encodePacked(application));
+        logMessages[0] = mockCrossL2ProverV2.formatSolLogMessage(abi.encodePacked(application));
 
         bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
 
@@ -643,7 +643,7 @@ contract PolymerOracleMappedTest is Test {
 
         // Decoded blob shorter than the required application(32) field.
         string[] memory logMessages = new string[](1);
-        logMessages[0] = mockCrossL2ProverV2.formatSolLogMessage(programID, abi.encodePacked(bytes4(0xdeadbeef)));
+        logMessages[0] = mockCrossL2ProverV2.formatSolLogMessage(abi.encodePacked(bytes4(0xdeadbeef)));
 
         bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
 

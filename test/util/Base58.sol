@@ -8,6 +8,9 @@ pragma solidity ^0.8.15;
  *      big-endian integer, repeatedly divided by 58, and each leading `0x00` byte maps to one leading `'1'` character.
  *      This is the exact rendering Solana uses for program ids (e.g. bytes32
  *      `0x06ddf6e1...eff00a9` -> "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").
+ *
+ *      Test-only: used to cross-check the program id Polymer returns for a Solana proof. `PolymerOracle` does not
+ *      use it (Polymer strips the `"program: <base58>, "` template off-chain and returns the program id as bytes32).
  */
 library Base58 {
     /// @dev Bitcoin/Solana base58 alphabet (no 0, O, I, l).

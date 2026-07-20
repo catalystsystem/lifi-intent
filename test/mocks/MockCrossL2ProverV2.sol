@@ -19,8 +19,7 @@ pragma solidity ^0.8.15;
 
 import { Base64 } from "openzeppelin/utils/Base64.sol";
 
-import { Base58 } from "../../Base58.sol";
-import { CrossL2ProverV2 } from "../core/prove_api/CrossL2ProverV2.sol";
+import { CrossL2ProverV2 } from "src/integrations/oracles/polymer/external/core/prove_api/CrossL2ProverV2.sol";
 
 contract MockCrossL2ProverV2 is CrossL2ProverV2 {
     // Event for proof generation
@@ -264,24 +263,20 @@ contract MockCrossL2ProverV2 is CrossL2ProverV2 {
     }
 
     /**
-     * @dev Formats a Solana log line in the shape `validateSolLogs` returns: a human-readable string of the form
-     *      `"program: <base58 program id>, <base64 blob>"` (the on-chain `"Prove: "` prefix is already stripped).
+     * @dev Formats a Solana log line in the shape `validateSolLogs` actually returns: just the base64 blob.
      *
-     *      The program id is rendered in base58 of the embedded bytes32 program id, matching both real Polymer output
-     *      and the oracle's enforced binding (the oracle requires the log to begin with exactly
-     *      `"program: " + base58(returnedProgramId) + ", "`). This keeps the mock producer consistent with the
-     *      consumer: passing `programId == returnedProgramId` yields a log the oracle accepts, while a mismatching id
-     *      produces a log the oracle rejects with `SolanaProgramIdMismatch`. The same base58 encoder used by the
-     *      oracle ({Base58}) is reused here so both sides agree byte-for-byte.
-     * @param programId Solana program id embedded in the human-readable prefix.
+     *      Polymer strips both the runtime `"Program log: "` prefix and the emitter's `"Prove: program: <id>, "`
+     *      template off-chain, so the returned log carries no program id in its text. The authenticated program id is
+     *      delivered out-of-band via the `programID` return value of `validateSolLogs` (see {generateMockSolProof}).
+     *      This mirrors real Polymer output verified against the live prover; keeping the mock faithful is why the
+     *      program id is NOT part of the log string.
      * @param blob Raw bytes to be base64-encoded as the log payload.
      * @return The formatted log string.
      */
     function formatSolLogMessage(
-        bytes32 programId,
         bytes memory blob
     ) public pure returns (string memory) {
-        return string(abi.encodePacked("program: ", Base58.encode(programId), ", ", Base64.encode(blob)));
+        return Base64.encode(blob);
     }
 
     /**

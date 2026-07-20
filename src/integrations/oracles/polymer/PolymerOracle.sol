@@ -5,8 +5,6 @@ import { LibAddress } from "../../../libs/LibAddress.sol";
 import { Base64 } from "openzeppelin/utils/Base64.sol";
 import { Bytes } from "openzeppelin/utils/Bytes.sol";
 
-import { Base58 } from "./Base58.sol";
-
 import { MandateOutput, MandateOutputEncodingLib } from "../../../libs/MandateOutputEncodingLib.sol";
 
 import { OutputVerificationLib } from "../../../libs/OutputVerificationLib.sol";
@@ -24,7 +22,6 @@ contract PolymerOracle is BaseInputOracle {
     error WrongEventSignature();
     error NotSolanaMessage();
     error InvalidSolanaMessage();
-    error SolanaProgramIdMismatch();
 
     uint256 internal constant SOLANA_POLYMER_CHAIN_ID = 2;
 
@@ -100,36 +97,15 @@ contract PolymerOracle is BaseInputOracle {
     /// ************** Solana Processing ************** ///
 
     /**
-     * @dev Processes a Solana proof.
+     * @dev Processes a Solana proof from `validateSolLogs`.
      *
-     * Trust model: the only value Polymer authenticates for a Solana proof is `returnedProgramId` (the program id
-     * returned by `validateSolLogs`, taken from the proven receipt). The remote-oracle/sender identity is therefore
-     * taken from `returnedProgramId` and NEVER from the log content (which is attacker-controllable). This mirrors the
-     * EVM path, which keys the sender identity on `address(this)` rather than on log data.
+     * Identity is the Polymer-authenticated `returnedProgramId`, never log content. Polymer binds each returned log to
+     * that program id (its membership proof commits `keccak256(programID || logs)`), so attestations self-namespace: a
+     * forged proof can only write under the attacker's own program id, which no honest order reads. Mirrors the EVM
+     * path keying on `emittingContract`; attribution ultimately trusts Polymer's ingestion.
      *
-     * ENFORCED program-id binding: each Solana log embeds the program id in its own human-readable prefix. Per
-     * Polymer's Solana-proving integration guidance, the program id returned by the prover MUST match the program id
-     * named in each proven log. We enforce this on-chain: every log is required to begin with exactly
-     * `"program: " + base58(returnedProgramId) + ", "` (see {_extractSolanaLogBlob}), reverting with
-     * {SolanaProgramIdMismatch} otherwise. This closes the gap where a mismatching (returnedProgramId, in-log id) pair
-     * could be accepted while the in-log id was silently discarded. The attestation is still keyed on the
-     * authenticated `returnedProgramId`, never on log content.
-     *
-     * Because the binding is enforced, attestations self-namespace: an attacker's Solana program can only produce logs
-     * that name (and are authenticated as) the attacker's own program id, so a forged proof can only ever write under
-     * `_attestations[chain][attackerProgramId][...]`. Honest orders reference the real program id as `output.oracle`,
-     * so a forged proof lands in a slot no honest order reads. No allowlist is required.
-     *
-     * Log format: `validateSolLogs` returns each log as a human-readable string of the form
-     * `"program: <base58 program id>, <base64 blob>"` (the on-chain `"Prove: "` prefix is already stripped by
-     * Polymer). After the authenticated prefix is matched, the trailing base64 blob is decoded.
-     *
-     * On-wire blob layout `application(32) || payload(dynamic)`:
-     * - bytes[0:32]   = `application` (bytes32)  // application/settler identifier (source)
-     * - bytes[32:]    = `payload` (bytes)        // raw payload bytes (dynamic length; must be non-empty)
-     *
-     * The Solana emitter `oracle_polymer::submit` emits `base64(source || payload)`: `source` is the
-     * 32-byte `application` at offset 0 and `payload` follows at offset 32.
+     * Each returned log is the raw base64 blob `application(32) || payload` (Polymer strips the emitter's
+     * `"Prove: program: <id>, "` template). A non-base64 or <=32-byte log reverts the whole proof (fail closed).
      */
     function _processSolanaMessage(
         bytes calldata proof
@@ -141,56 +117,20 @@ contract PolymerOracle is BaseInputOracle {
 
         uint256 remoteChainId = _getChainId(uint256(chainId));
 
-        // `Base58.encode(returnedProgramId)` is invariant across all logs in this proof and expensive to compute, so
-        // build the expected authenticated prefix once and reuse it for every log.
-        bytes memory expectedPrefix = abi.encodePacked("program: ", Base58.encode(returnedProgramId), ", ");
-
         for (uint256 i = 0; i < logMessages.length; ++i) {
-            // The in-log program id is bound to the Polymer-authenticated `returnedProgramId`: the log must begin with
-            // exactly `"program: " + base58(returnedProgramId) + ", "`, otherwise this reverts.
-            bytes memory logBytes = Base64.decode(_extractSolanaLogBlob(logMessages[i], expectedPrefix));
+            // Whole log is base64(application(32) || payload); decode reverts on non-base64 (fail closed).
+            bytes memory logBytes = Base64.decode(logMessages[i]);
 
-            // Require a NON-empty payload: length must be strictly greater than the application field (offset 32), so
-            // a bare 32-byte blob (empty payload hashing to keccak256("")) is rejected.
+            // Reject an empty payload (a bare 32-byte blob would hash keccak256("")).
             if (logBytes.length <= SOLANA_PAYLOAD_OFFSET) revert InvalidSolanaMessage();
 
             bytes32 application =
                 bytes32(Bytes.slice(logBytes, SOLANA_APPLICATION_OFFSET, SOLANA_APPLICATION_OFFSET + 32));
             bytes32 payloadHash = keccak256(Bytes.slice(logBytes, SOLANA_PAYLOAD_OFFSET, logBytes.length));
 
-            // Sender identity is the Polymer-authenticated program id, never log content.
             _attestations[remoteChainId][returnedProgramId][application][payloadHash] = true;
-
             emit OutputProven(remoteChainId, returnedProgramId, application, payloadHash);
         }
-    }
-
-    /**
-     * @dev Extracts the trailing base64 blob from a Solana log string of the form
-     * `"program: <base58 program id>, <base64 blob>"`, binding the in-log program id to the Polymer-authenticated
-     * `returnedProgramId`. The log MUST begin with exactly the precomputed `expectedPrefix`
-     * (`"program: " + base58(returnedProgramId) + ", "`); the returned blob is the remainder after that prefix. The
-     * caller precomputes `expectedPrefix` once per proof because `Base58.encode` is expensive. Reverts with
-     * {SolanaProgramIdMismatch} if the log does not carry the expected authenticated prefix (this also covers a
-     * missing/malformed `"program: ..., "` wrapper).
-     */
-    function _extractSolanaLogBlob(
-        string memory logMessage,
-        bytes memory expectedPrefix
-    ) internal pure returns (string memory) {
-        bytes memory logBytes = bytes(logMessage);
-        uint256 prefixLen = expectedPrefix.length;
-
-        if (logBytes.length < prefixLen) revert SolanaProgramIdMismatch();
-        for (uint256 i = 0; i < prefixLen; ++i) {
-            if (logBytes[i] != expectedPrefix[i]) revert SolanaProgramIdMismatch();
-        }
-
-        bytes memory blob = new bytes(logBytes.length - prefixLen);
-        for (uint256 j = 0; j < blob.length; ++j) {
-            blob[j] = logBytes[prefixLen + j];
-        }
-        return string(blob);
     }
 
     function receiveMessage(
