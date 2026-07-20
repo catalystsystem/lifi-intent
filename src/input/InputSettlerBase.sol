@@ -58,7 +58,7 @@ abstract contract InputSettlerBase is EIP712 {
      */
     error FillDeadlineAfterExpiry(uint32 fillDeadline, uint32 expires);
     /**
-     * @dev `order.user` is the zero address. The user is the refund recipient; a zero user would burn refunds.
+     * @dev `order.user` is the zero address.
      */
     error UserIsZero();
 

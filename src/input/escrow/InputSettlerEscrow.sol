@@ -347,14 +347,11 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
         bytes32 orderId
     ) internal {
         uint256 numInputs = inputs.length;
-        // Native ETH cannot be pulled by an ERC-3009 authorization. As on the Permit2 path, this guard is
-        // load-bearing: no collection path may mark an order Deposited without actually receiving its inputs.
-        for (uint256 i; i < numInputs; ++i) {
-            if (inputs[i][0] == 0) revert NativeTokenNotSupported();
-        }
         if (numInputs == 1) {
             // If there is only 1 input, try using the provided signature as is.
             uint256[2] calldata input = inputs[0];
+            // Native ETH cannot be pulled by an ERC-3009 authorization.
+            if (input[0] == 0) revert NativeTokenNotSupported();
             bytes memory callData = abi.encodeCall(
                 IERC3009.receiveWithAuthorization,
                 (signer, address(this), input[1], 0, fillDeadline, orderId, _signature_)
@@ -386,6 +383,8 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
         }
         for (uint256 i; i < numInputs; ++i) {
             uint256[2] calldata input = inputs[i];
+            // Native ETH cannot be pulled by an ERC-3009 authorization.
+            if (input[0] == 0) revert NativeTokenNotSupported();
             bytes calldata signature = BytesLib.getBytesOfArray(_signature_, i);
             address token = input[0].validatedCleanAddress();
             uint256 balanceBefore = IERC20(token).balanceOf(address(this));
@@ -677,7 +676,6 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
 
     /**
      * @dev Requires msg.value to exactly fund every discounted native input before the purchase makes external calls.
-     * This prevents a purchaser from paying a native-input solver with ETH pooled for other escrowed orders.
      */
     function _validatePurchaseNativeValue(uint256[2][] calldata inputs, uint256 discount) internal view {
         uint256 nativeAmount = 0;
