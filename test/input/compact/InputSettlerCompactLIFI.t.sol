@@ -9,6 +9,8 @@ import { InputSettlerCompactTest } from "OIF/test/input/compact/InputSettlerComp
 import { StandardOrder } from "OIF/src/input/types/StandardOrderType.sol";
 import { MandateOutput } from "OIF/src/libs/MandateOutputEncodingLib.sol";
 
+import { MockCallbackExecutor } from "test/mocks/MockCallbackExecutor.sol";
+
 contract InputSettlerCompactLIFITest is InputSettlerCompactTest {
     // uint64 constant GOVERNANCE_FEE_CHANGE_DELAY = 7 days;
     // uint64 constant MAX_GOVERNANCE_FEE = 10 ** 18 * 0.05; // 10%
@@ -130,9 +132,8 @@ contract InputSettlerCompactLIFITest is InputSettlerCompactTest {
         uint256 amountPostFee = amount - govFeeAmount;
 
         InputSettlerBase.SolveParams[] memory solveParams = new InputSettlerBase.SolveParams[](1);
-        solveParams[0] = InputSettlerBase.SolveParams({
-            solver: bytes32(uint256(uint160((solver)))), timestamp: fillTimestamp
-        });
+        solveParams[0] =
+            InputSettlerBase.SolveParams({ solver: bytes32(uint256(uint160((solver)))), timestamp: fillTimestamp });
 
         vm.prank(solver);
         InputSettlerCompactLIFI(inputSettlerCompact)
@@ -141,5 +142,75 @@ contract InputSettlerCompactLIFITest is InputSettlerCompactTest {
 
         assertEq(token.balanceOf(solver), amountPostFee);
         assertEq(theCompact.balanceOf(owner, tokenId), govFeeAmount);
+    }
+
+    function test_finalise_callback_receives_net_inputs(
+        uint64 fee
+    ) public {
+        vm.assume(fee <= MAX_GOVERNANCE_FEE);
+        vm.prank(owner);
+        InputSettlerCompactLIFI(inputSettlerCompact).setGovernanceFee(fee);
+        uint32 fillTimestamp = uint32(block.timestamp + GOVERNANCE_FEE_CHANGE_DELAY + 1);
+        vm.warp(fillTimestamp);
+        InputSettlerCompactLIFI(inputSettlerCompact).applyGovernanceFee();
+
+        uint256 amount = 1e18 / 10;
+        MockCallbackExecutor callbackDest = new MockCallbackExecutor();
+
+        token.mint(swapper, amount);
+        vm.prank(swapper);
+        token.approve(address(theCompact), type(uint256).max);
+        vm.prank(swapper);
+        uint256 tokenId = theCompact.depositERC20(address(token), alwaysOkAllocatorLockTag, amount, swapper);
+
+        uint256[2][] memory inputs = new uint256[2][](1);
+        inputs[0] = [tokenId, amount];
+        MandateOutput[] memory outputs = new MandateOutput[](1);
+        outputs[0] = MandateOutput({
+            settler: bytes32(uint256(uint160(address(outputSettlerCoin)))),
+            oracle: bytes32(uint256(uint160(address(alwaysYesOracle)))),
+            chainId: block.chainid,
+            token: bytes32(uint256(uint160(address(anotherToken)))),
+            amount: amount,
+            recipient: bytes32(uint256(uint160(swapper))),
+            callbackData: hex"",
+            context: hex""
+        });
+        StandardOrder memory order = StandardOrder({
+            user: address(swapper),
+            nonce: 0,
+            originChainId: block.chainid,
+            fillDeadline: type(uint32).max,
+            expires: type(uint32).max,
+            inputOracle: alwaysYesOracle,
+            inputs: inputs,
+            outputs: outputs
+        });
+
+        uint256[2][] memory idsAndAmounts = new uint256[2][](1);
+        idsAndAmounts[0] = [tokenId, amount];
+        bytes memory sponsorSig = getCompactBatchWitnessSignature(
+            swapperPrivateKey, inputSettlerCompact, swapper, 0, type(uint32).max, idsAndAmounts, witnessHash(order)
+        );
+        bytes memory signature = abi.encode(sponsorSig, hex"");
+
+        uint256 govFeeAmount = (amount * fee) / 10 ** 18;
+        uint256[2][] memory expectedNet = new uint256[2][](1);
+        expectedNet[0] = [tokenId, amount - govFeeAmount];
+
+        bytes memory call = hex"c0ffee";
+
+        InputSettlerBase.SolveParams[] memory solveParams = new InputSettlerBase.SolveParams[](1);
+        solveParams[0] =
+            InputSettlerBase.SolveParams({ solver: bytes32(uint256(uint160((solver)))), timestamp: fillTimestamp });
+
+        // The callback must be invoked with the net delivered amounts, not the gross order inputs.
+        vm.expectCall(
+            address(callbackDest), abi.encodeWithSignature("orderFinalised(uint256[2][],bytes)", expectedNet, call)
+        );
+
+        vm.prank(solver);
+        InputSettlerCompactLIFI(inputSettlerCompact)
+            .finalise(order, signature, solveParams, bytes32(uint256(uint160(address(callbackDest)))), call);
     }
 }

@@ -121,7 +121,7 @@ contract InputSettlerEscrowLIFI is InputSettlerEscrow, GovernanceFee {
         emit Finalised(orderId, msg.sender.toIdentifier(), destination.toIdentifier());
 
         // Call the destination (if needed) so the caller can inject logic into our call.
-        if (call.length > 0) IInputCallback(destination).orderFinalised(inputs, call);
+        if (call.length > 0) IInputCallback(destination).orderFinalised(_netInputs(inputs), call);
 
         // Validate the fill. The solver may use the reentrance of the above line to execute the fill.
         _validateFillsNow(order.inputOracle, order.outputs, orderId);
@@ -154,7 +154,9 @@ contract InputSettlerEscrowLIFI is InputSettlerEscrow, GovernanceFee {
 
         _finalise(order, orderId, solveParams[0].solver, destination);
 
-        if (call.length > 0) IInputCallback(destination.fromIdentifier()).orderFinalised(order.inputs, call);
+        if (call.length > 0) {
+            IInputCallback(destination.fromIdentifier()).orderFinalised(_netInputs(order.inputs), call);
+        }
 
         _validateFills(order.fillDeadline, order.inputOracle, order.outputs, orderId, solveParams);
     }
@@ -191,7 +193,9 @@ contract InputSettlerEscrowLIFI is InputSettlerEscrow, GovernanceFee {
 
         _finalise(order, orderId, solveParams[0].solver, destination);
 
-        if (call.length > 0) IInputCallback(destination.fromIdentifier()).orderFinalised(order.inputs, call);
+        if (call.length > 0) {
+            IInputCallback(destination.fromIdentifier()).orderFinalised(_netInputs(order.inputs), call);
+        }
 
         _validateFills(order.fillDeadline, order.inputOracle, order.outputs, orderId, solveParams);
     }

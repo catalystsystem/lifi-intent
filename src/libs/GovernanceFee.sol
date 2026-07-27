@@ -97,4 +97,27 @@ abstract contract GovernanceFee is Ownable {
             return amountFee = (amount * fee) / GOVERNANCE_FEE_DENOM;
         }
     }
+
+    /**
+     * @notice Returns a copy of `inputs` with the governance fee deducted from each amount, matching exactly what the
+     * settler's `_resolveLock` delivers to the destination on a finalise/claim.
+     * @dev Used to give input callbacks the net (delivered) amounts rather than the gross order inputs. Applies the
+     * same
+     * fee gate as the claim paths: the fee is taken only when an owner is set. Callbacks never run on the refund path,
+     * so the refund waiver does not apply here.
+     * @param inputs The gross order inputs.
+     * @return netInputs A fresh array with the same token ids and fee-adjusted amounts.
+     */
+    function _netInputs(
+        uint256[2][] calldata inputs
+    ) internal view returns (uint256[2][] memory netInputs) {
+        address _owner = owner();
+        uint64 fee = _owner != address(0) ? governanceFee : 0;
+        uint256 numInputs = inputs.length;
+        netInputs = new uint256[2][](numInputs);
+        for (uint256 i; i < numInputs; ++i) {
+            uint256 amount = inputs[i][1];
+            netInputs[i] = [inputs[i][0], amount - _calcFee(amount, fee)];
+        }
+    }
 }
