@@ -163,40 +163,44 @@ contract InputSettlerCompactLIFITest is InputSettlerCompactTest {
         vm.prank(swapper);
         uint256 tokenId = theCompact.depositERC20(address(token), alwaysOkAllocatorLockTag, amount, swapper);
 
-        uint256[2][] memory inputs = new uint256[2][](1);
-        inputs[0] = [tokenId, amount];
-        MandateOutput[] memory outputs = new MandateOutput[](1);
-        outputs[0] = MandateOutput({
-            settler: bytes32(uint256(uint160(address(outputSettlerCoin)))),
-            oracle: bytes32(uint256(uint160(address(alwaysYesOracle)))),
-            chainId: block.chainid,
-            token: bytes32(uint256(uint160(address(anotherToken)))),
-            amount: amount,
-            recipient: bytes32(uint256(uint160(swapper))),
-            callbackData: hex"",
-            context: hex""
-        });
-        StandardOrder memory order = StandardOrder({
-            user: address(swapper),
-            nonce: 0,
-            originChainId: block.chainid,
-            fillDeadline: type(uint32).max,
-            expires: type(uint32).max,
-            inputOracle: alwaysYesOracle,
-            inputs: inputs,
-            outputs: outputs
-        });
+        // Scope the intermediates: `forge coverage` compiles without viaIR/optimizer, and keeping
+        // every local live until the `finalise` call below overflows the legacy stack.
+        StandardOrder memory order;
+        {
+            uint256[2][] memory inputs = new uint256[2][](1);
+            inputs[0] = [tokenId, amount];
+            MandateOutput[] memory outputs = new MandateOutput[](1);
+            outputs[0] = MandateOutput({
+                settler: bytes32(uint256(uint160(address(outputSettlerCoin)))),
+                oracle: bytes32(uint256(uint160(address(alwaysYesOracle)))),
+                chainId: block.chainid,
+                token: bytes32(uint256(uint160(address(anotherToken)))),
+                amount: amount,
+                recipient: bytes32(uint256(uint160(swapper))),
+                callbackData: hex"",
+                context: hex""
+            });
+            order = StandardOrder({
+                user: address(swapper),
+                nonce: 0,
+                originChainId: block.chainid,
+                fillDeadline: type(uint32).max,
+                expires: type(uint32).max,
+                inputOracle: alwaysYesOracle,
+                inputs: inputs,
+                outputs: outputs
+            });
+        }
 
-        uint256[2][] memory idsAndAmounts = new uint256[2][](1);
-        idsAndAmounts[0] = [tokenId, amount];
-        bytes memory sponsorSig = getCompactBatchWitnessSignature(
-            swapperPrivateKey, inputSettlerCompact, swapper, 0, type(uint32).max, idsAndAmounts, witnessHash(order)
-        );
-        bytes memory signature = abi.encode(sponsorSig, hex"");
-
-        uint256 govFeeAmount = (amount * fee) / 10 ** 18;
-        uint256[2][] memory expectedNet = new uint256[2][](1);
-        expectedNet[0] = [tokenId, amount - govFeeAmount];
+        bytes memory signature;
+        {
+            uint256[2][] memory idsAndAmounts = new uint256[2][](1);
+            idsAndAmounts[0] = [tokenId, amount];
+            bytes memory sponsorSig = getCompactBatchWitnessSignature(
+                swapperPrivateKey, inputSettlerCompact, swapper, 0, type(uint32).max, idsAndAmounts, witnessHash(order)
+            );
+            signature = abi.encode(sponsorSig, hex"");
+        }
 
         bytes memory call = hex"c0ffee";
 
@@ -204,10 +208,16 @@ contract InputSettlerCompactLIFITest is InputSettlerCompactTest {
         solveParams[0] =
             InputSettlerBase.SolveParams({ solver: bytes32(uint256(uint160((solver)))), timestamp: fillTimestamp });
 
-        // The callback must be invoked with the net delivered amounts, not the gross order inputs.
-        vm.expectCall(
-            address(callbackDest), abi.encodeWithSignature("orderFinalised(uint256[2][],bytes)", expectedNet, call)
-        );
+        {
+            uint256 govFeeAmount = (amount * fee) / 10 ** 18;
+            uint256[2][] memory expectedNet = new uint256[2][](1);
+            expectedNet[0] = [tokenId, amount - govFeeAmount];
+
+            // The callback must be invoked with the net delivered amounts, not the gross order inputs.
+            vm.expectCall(
+                address(callbackDest), abi.encodeWithSignature("orderFinalised(uint256[2][],bytes)", expectedNet, call)
+            );
+        }
 
         vm.prank(solver);
         InputSettlerCompactLIFI(inputSettlerCompact)
