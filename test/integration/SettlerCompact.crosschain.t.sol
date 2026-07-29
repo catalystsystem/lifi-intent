@@ -24,6 +24,7 @@ import { Setters } from "../../src/integrations/oracles/wormhole/external/wormho
 import { Structs } from "../../src/integrations/oracles/wormhole/external/wormhole/Structs.sol";
 import { IInputSettlerCompact } from "../../src/interfaces/IInputSettlerCompact.sol";
 import { MandateOutputEncodingLib } from "../../src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 import { MessageEncodingLib } from "../../src/libs/MessageEncodingLib.sol";
 
 import { LibAddress } from "../../src/libs/LibAddress.sol";
@@ -438,7 +439,7 @@ contract InputSettlerCompactTestCrossChain is Test {
         }
         {
             bytes[] memory payloads = new bytes[](1);
-            payloads[0] = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+            payloads[0] = RefEncodingLib.encodeFillDescriptionMemory(
                 solverIdentifier,
                 orderId,
                 uint32(block.timestamp),
@@ -543,7 +544,7 @@ contract InputSettlerCompactTestCrossChain is Test {
             outputSettlerCoin.fill(orderId, outputs[1], type(uint48).max, fillerData2);
 
             bytes[] memory payloads = new bytes[](2);
-            payloads[0] = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+            payloads[0] = RefEncodingLib.encodeFillDescriptionMemory(
                 solverIdentifier,
                 orderId,
                 uint32(block.timestamp),
@@ -553,7 +554,7 @@ contract InputSettlerCompactTestCrossChain is Test {
                 outputs[0].callbackData,
                 outputs[0].context
             );
-            payloads[1] = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+            payloads[1] = RefEncodingLib.encodeFillDescriptionMemory(
                 solverIdentifier2,
                 orderId,
                 uint32(block.timestamp),

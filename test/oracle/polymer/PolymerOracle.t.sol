@@ -4,9 +4,11 @@ pragma solidity ^0.8.22;
 
 import { Test } from "forge-std/Test.sol";
 
+import { Base64 } from "openzeppelin/utils/Base64.sol";
 import { MandateOutput } from "src/input/types/MandateOutputType.sol";
+import { Base58 } from "test/util/Base58.sol";
 import { PolymerOracle } from "src/integrations/oracles/polymer/PolymerOracle.sol";
-import { MockCrossL2ProverV2 } from "src/integrations/oracles/polymer/external/mocks/MockCrossL2ProverV2.sol";
+import { MockCrossL2ProverV2 } from "test/mocks/MockCrossL2ProverV2.sol";
 import { LibAddress } from "src/libs/LibAddress.sol";
 
 import { MockERC20 } from "../../mocks/MockERC20.sol";
@@ -15,6 +17,7 @@ import { InputSettlerEscrow } from "src/input/escrow/InputSettlerEscrow.sol";
 import { StandardOrder } from "src/input/types/StandardOrderType.sol";
 import { IInputSettlerEscrow } from "src/interfaces/IInputSettlerEscrow.sol";
 import { MandateOutputEncodingLib } from "src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 import { OutputSettlerBase } from "src/output/OutputSettlerBase.sol";
 import { OutputSettlerSimple } from "src/output/simple/OutputSettlerSimple.sol";
 
@@ -77,7 +80,7 @@ contract PolymerOracleTest is Test {
         topics[1] = orderId;
 
         MandateOutput memory mandateOutput = MandateOutput({
-            oracle: makeAddr("oracle").toIdentifier(),
+            oracle: address(polymerOracle).toIdentifier(),
             settler: makeAddr("settler").toIdentifier(),
             chainId: 1,
             token: makeAddr("token").toIdentifier(),
@@ -96,7 +99,7 @@ contract PolymerOracleTest is Test {
             mockCrossL2ProverV2.generateAndEmitProof(remoteChainId, makeAddr("settler"), topics, unindexedData);
 
         bytes32 expectedPayloadHash = keccak256(
-            MandateOutputEncodingLib.encodeFillDescriptionMemory(
+            RefEncodingLib.encodeFillDescriptionMemory(
                 solver.toIdentifier(), orderId, timestamp, mandateOutput
             )
         );
@@ -119,7 +122,7 @@ contract PolymerOracleTest is Test {
         topics[1] = orderId1;
 
         MandateOutput memory mandateOutput = MandateOutput({
-            oracle: makeAddr("oracle").toIdentifier(),
+            oracle: address(polymerOracle).toIdentifier(),
             settler: makeAddr("settler").toIdentifier(),
             chainId: 1,
             token: makeAddr("token").toIdentifier(),
@@ -139,7 +142,7 @@ contract PolymerOracleTest is Test {
             mockCrossL2ProverV2.generateAndEmitProof(remoteChainId1, makeAddr("settler"), topics, unindexedData);
 
         bytes32 expectedPayloadHash1 = keccak256(
-            MandateOutputEncodingLib.encodeFillDescriptionMemory(
+            RefEncodingLib.encodeFillDescriptionMemory(
                 solver.toIdentifier(), orderId1, timestamp, mandateOutput
             )
         );
@@ -150,7 +153,7 @@ contract PolymerOracleTest is Test {
             mockCrossL2ProverV2.generateAndEmitProof(remoteChainId2, makeAddr("settler"), topics, unindexedData);
 
         bytes32 expectedPayloadHash2 = keccak256(
-            MandateOutputEncodingLib.encodeFillDescriptionMemory(
+            RefEncodingLib.encodeFillDescriptionMemory(
                 solver.toIdentifier(), orderId2, timestamp, mandateOutput
             )
         );
@@ -172,6 +175,239 @@ contract PolymerOracleTest is Test {
         proofs[0] = mockProof1;
         proofs[1] = mockProof2;
         polymerOracle.receiveMessage(proofs);
+    }
+
+    // --- OutputNotFilled --- //
+
+    function _notFilledOutput() internal returns (MandateOutput memory) {
+        return MandateOutput({
+            oracle: address(polymerOracle).toIdentifier(),
+            settler: makeAddr("settler").toIdentifier(),
+            chainId: 1,
+            token: makeAddr("token").toIdentifier(),
+            amount: 1000000000000000000,
+            recipient: makeAddr("recipient").toIdentifier(),
+            callbackData: bytes(""),
+            context: bytes("")
+        });
+    }
+
+    function test_receiveMessage_notFilled_proof() public {
+        bytes32 orderId = keccak256("orderId");
+        uint32 fillDeadline = uint32(block.timestamp);
+        MandateOutput memory output = _notFilledOutput();
+
+        bytes32[] memory topics = new bytes32[](2);
+        topics[0] = OutputSettlerBase.OutputNotFilled.selector;
+        topics[1] = orderId;
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitProof(
+            uint32(output.chainId), makeAddr("settler"), topics, abi.encode(output, fillDeadline)
+        );
+
+        bytes32 expectedPayloadHash =
+            keccak256(RefEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, output));
+
+        vm.expectEmit();
+        emit OutputProven(
+            output.chainId,
+            address(polymerOracle).toIdentifier(),
+            makeAddr("settler").toIdentifier(),
+            expectedPayloadHash
+        );
+        polymerOracle.receiveMessage(mockProof);
+
+        assertTrue(
+            polymerOracle.isProven(
+                output.chainId,
+                address(polymerOracle).toIdentifier(),
+                makeAddr("settler").toIdentifier(),
+                expectedPayloadHash
+            )
+        );
+    }
+
+    /// @dev The oracle in the proven event must be this PolymerOracle (same address on all chains). Otherwise
+    /// `emitNotFilled`'s fill-record check may have run under a different oracle key than the attestation is stored
+    /// under, letting a filled output (oracle A) be replayed as not-filled with oracle B.
+    function test_revert_receiveMessage_wrong_oracle() public {
+        bytes32 orderId = keccak256("orderId");
+        uint32 fillDeadline = uint32(block.timestamp);
+        MandateOutput memory output = _notFilledOutput();
+        output.oracle = makeAddr("otherOracle").toIdentifier();
+
+        bytes32[] memory topics = new bytes32[](2);
+        topics[0] = OutputSettlerBase.OutputNotFilled.selector;
+        topics[1] = orderId;
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitProof(
+            uint32(output.chainId), makeAddr("settler"), topics, abi.encode(output, fillDeadline)
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "WrongOutputOracle(bytes32,bytes32)", address(polymerOracle).toIdentifier(), output.oracle
+            )
+        );
+        polymerOracle.receiveMessage(mockProof);
+
+        // Same guard on the fill branch.
+        topics[0] = OutputSettlerBase.OutputFilled.selector;
+        bytes memory fillProof = mockCrossL2ProverV2.generateAndEmitProof(
+            uint32(output.chainId),
+            makeAddr("settler"),
+            topics,
+            abi.encode(solver.toIdentifier(), uint32(block.timestamp), output)
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "WrongOutputOracle(bytes32,bytes32)", address(polymerOracle).toIdentifier(), output.oracle
+            )
+        );
+        polymerOracle.receiveMessage(fillProof);
+    }
+
+    /// @dev End-to-end quick refund over the Polymer rail: open → deadline passes unfilled → emitNotFilled on the
+    /// output settler → prove the event → refundOnNonFill releases the escrow before order.expires. Also asserts
+    /// cross-consumption fails in both directions (NotProven).
+    function test_receiveMessage_notFilled_and_refundOnNonFill() public {
+        uint256 amount = 1e18 / 10;
+
+        MandateOutput[] memory outputs = new MandateOutput[](1);
+        outputs[0] = MandateOutput({
+            settler: address(outputSettler).toIdentifier(),
+            oracle: address(polymerOracle).toIdentifier(),
+            chainId: block.chainid,
+            token: address(anotherToken).toIdentifier(),
+            amount: amount,
+            recipient: swapper.toIdentifier(),
+            callbackData: hex"",
+            context: hex""
+        });
+        uint256[2][] memory inputs = new uint256[2][](1);
+        inputs[0] = [uint256(uint160(address(token))), amount];
+
+        uint32 fillDeadline = uint32(block.timestamp + 10 minutes);
+        StandardOrder memory order = StandardOrder({
+            user: swapper,
+            nonce: 0,
+            originChainId: block.chainid,
+            expires: uint32(block.timestamp + 5 hours),
+            fillDeadline: fillDeadline,
+            inputOracle: address(polymerOracle),
+            inputs: inputs,
+            outputs: outputs
+        });
+
+        // Deposit into the escrow.
+        vm.prank(swapper);
+        token.approve(inputSettlerEscrow, amount);
+        vm.prank(swapper);
+        IInputSettlerEscrow(inputSettlerEscrow).open(order);
+        assertEq(token.balanceOf(swapper), 1e18 - amount);
+
+        bytes32 orderId = IInputSettlerEscrow(inputSettlerEscrow).orderIdentifier(order);
+
+        // Nobody fills. The deadline passes.
+        vm.warp(fillDeadline + 1);
+
+        // Stage A: emit the attestable non-fill event on the output settler.
+        vm.expectEmit();
+        emit OutputSettlerBase.OutputNotFilled(orderId, outputs[0], fillDeadline);
+        outputSettler.emitNotFilled(orderId, outputs[0], fillDeadline);
+
+        // Stage B: prove the event through Polymer.
+        bytes32[] memory topics = new bytes32[](2);
+        topics[0] = OutputSettlerBase.OutputNotFilled.selector;
+        topics[1] = orderId;
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitProof(
+            uint32(block.chainid), address(outputSettler), topics, abi.encode(outputs[0], fillDeadline)
+        );
+
+        bytes32 payloadHash =
+            keccak256(RefEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, outputs[0]));
+        vm.expectEmit();
+        emit OutputProven(
+            block.chainid, address(polymerOracle).toIdentifier(), address(outputSettler).toIdentifier(), payloadHash
+        );
+        polymerOracle.receiveMessage(mockProof);
+
+        // Cross-consumption: the proven non-fill must not be usable to finalise.
+        InputSettlerBase.SolveParams[] memory solveParams = new InputSettlerBase.SolveParams[](1);
+        solveParams[0] = InputSettlerBase.SolveParams({ solver: solver.toIdentifier(), timestamp: fillDeadline });
+        vm.prank(solver);
+        vm.expectRevert(abi.encodeWithSignature("NotProven()"));
+        IInputSettlerEscrow(inputSettlerEscrow).finalise(order, solveParams, solver.toIdentifier(), hex"");
+
+        // Stage C: the refund consumes the proof and releases the escrow, well before order.expires.
+        vm.expectCall(
+            address(polymerOracle),
+            abi.encodeWithSignature(
+                "efficientRequireProven(bytes)",
+                abi.encodePacked(outputs[0].chainId, outputs[0].oracle, outputs[0].settler, payloadHash)
+            )
+        );
+        IInputSettlerEscrow(inputSettlerEscrow).refundOnNonFill(order, 0);
+
+        assertLt(block.timestamp, order.expires);
+        assertEq(token.balanceOf(swapper), 1e18);
+    }
+
+    /// @dev Cross-consumption in the other direction: a proven FILL must not be usable by refundOnNonFill.
+    function test_revert_refundOnNonFill_with_fill_proof() public {
+        uint256 amount = 1e18 / 10;
+
+        MandateOutput[] memory outputs = new MandateOutput[](1);
+        outputs[0] = MandateOutput({
+            settler: address(outputSettler).toIdentifier(),
+            oracle: address(polymerOracle).toIdentifier(),
+            chainId: block.chainid,
+            token: address(anotherToken).toIdentifier(),
+            amount: amount,
+            recipient: swapper.toIdentifier(),
+            callbackData: hex"",
+            context: hex""
+        });
+        uint256[2][] memory inputs = new uint256[2][](1);
+        inputs[0] = [uint256(uint160(address(token))), amount];
+
+        uint32 fillDeadline = uint32(block.timestamp + 10 minutes);
+        StandardOrder memory order = StandardOrder({
+            user: swapper,
+            nonce: 0,
+            originChainId: block.chainid,
+            expires: uint32(block.timestamp + 5 hours),
+            fillDeadline: fillDeadline,
+            inputOracle: address(polymerOracle),
+            inputs: inputs,
+            outputs: outputs
+        });
+
+        vm.prank(swapper);
+        token.approve(inputSettlerEscrow, amount);
+        vm.prank(swapper);
+        IInputSettlerEscrow(inputSettlerEscrow).open(order);
+
+        bytes32 orderId = IInputSettlerEscrow(inputSettlerEscrow).orderIdentifier(order);
+
+        // The output was filled before the deadline and the fill proven through Polymer.
+        uint32 fillTimestamp = uint32(block.timestamp);
+        bytes32[] memory topics = new bytes32[](2);
+        topics[0] = OutputSettlerBase.OutputFilled.selector;
+        topics[1] = orderId;
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitProof(
+            uint32(block.chainid),
+            address(outputSettler),
+            topics,
+            abi.encode(solver.toIdentifier(), fillTimestamp, outputs[0])
+        );
+        polymerOracle.receiveMessage(mockProof);
+
+        // The fill proof cannot be consumed as a non-fill.
+        vm.warp(fillDeadline + 1);
+        vm.expectRevert(abi.encodeWithSignature("NotProven()"));
+        IInputSettlerEscrow(inputSettlerEscrow).refundOnNonFill(order, 0);
     }
 
     function test_receiveMessage_wrong_event_signature() public {
@@ -229,7 +465,7 @@ contract PolymerOracleTest is Test {
         assertEq(token.balanceOf(solver), 0);
 
         bytes32 orderId = IInputSettlerEscrow(inputSettlerEscrow).orderIdentifier(order);
-        bytes memory payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        bytes memory payload = RefEncodingLib.encodeFillDescriptionMemory(
             solver.toIdentifier(), orderId, uint32(block.timestamp), outputs[0]
         );
         bytes32 payloadHash = keccak256(payload);
@@ -265,5 +501,174 @@ contract PolymerOracleTest is Test {
         IInputSettlerEscrow(inputSettlerEscrow).finalise(order, solveParams, solver.toIdentifier(), hex"");
 
         assertEq(token.balanceOf(solver), amount);
+    }
+
+    /// ************** Solana Processing ************** ///
+
+    /// @dev Builds a Solana log in the real Polymer format: the raw `base64(application(32) || payload(dynamic))` blob
+    ///      (Polymer strips the `"Prove: program: <id>, "` template off-chain; the program id is delivered separately).
+    function _encodeSolanaLog(
+        bytes32 application,
+        bytes memory payload
+    ) internal view returns (string memory) {
+        return mockCrossL2ProverV2.formatSolLogMessage(abi.encodePacked(application, payload));
+    }
+
+    function test_receiveSolanaMessage_with_proof() public {
+        uint32 solanaChainId = 2; // base variant uses identity chain mapping.
+        bytes32 programID = keccak256("solana-program");
+        bytes32 application = makeAddr("settler").toIdentifier();
+        bytes memory payload = bytes("test-payload");
+        bytes32 payloadHash = keccak256(payload);
+
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = _encodeSolanaLog(application, payload);
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
+
+        // Sender identity is the authenticated program id.
+        vm.expectEmit();
+        emit OutputProven(uint256(solanaChainId), programID, application, payloadHash);
+        polymerOracle.receiveSolanaMessage(mockProof);
+
+        assertTrue(polymerOracle.isProven(uint256(solanaChainId), programID, application, payloadHash));
+    }
+
+    /// @dev GOLDEN fixture. The log line, application and payload hash below are immutable literals computed OFFLINE
+    ///      from the real Polymer wire format: the returned log is exactly `base64(application(32) || payload)` (the
+    ///      `"Prove: program: <id>, "` template is stripped by Polymer). This pins the exact bytes the shipped oracle
+    ///      must accept and the attestation slot it must set for the Polymer-authenticated program id.
+    ///
+    ///      Fixture:
+    ///      - programID (bytes32)   = 0x06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9 (out-of-band)
+    ///      - application (bytes32) = 0x...deadbeef
+    ///      - payload               = "golden-payload"
+    ///      - base64(application(32) || payload) = "AAAA...N6tvu9nb2xkZW4tcGF5bG9hZA=="
+    ///      - payloadHash = keccak256("golden-payload")
+    function test_receiveSolanaMessage_golden_fixture() public {
+        uint32 solanaChainId = 2;
+
+        // Program id authenticated by Polymer (proof[182:214]) and returned out-of-band as `programID`.
+        bytes32 programID = 0x06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9;
+        bytes32 application = 0x00000000000000000000000000000000000000000000000000000000deadbeef;
+        // keccak256("golden-payload")
+        bytes32 payloadHash = 0x11d41300e405124d7e79e9a507b5abe013e238cf350fbf90a46fcca903614473;
+
+        // Hand-built log in the exact form `validateSolLogs` returns: just base64(application(32) || "golden-payload"),
+        // with no program-id prefix (Polymer strips it).
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAN6tvu9nb2xkZW4tcGF5bG9hZA==";
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
+
+        vm.expectEmit();
+        emit OutputProven(uint256(solanaChainId), programID, application, payloadHash);
+        polymerOracle.receiveSolanaMessage(mockProof);
+
+        assertTrue(polymerOracle.isProven(uint256(solanaChainId), programID, application, payloadHash));
+    }
+
+    /// @dev CRITICAL regression on the base variant: Polymer binds every returned log to the authenticated program id
+    ///      (its membership key includes the program id), so an attacker's forged proof is authenticated as the
+    ///      attacker's OWN program id. Their attestation lands under the attacker's program id and is invisible to any
+    ///      honest order that references the real (victim) program.
+    function test_receiveSolanaMessage_forged_program_self_namespaces() public {
+        uint32 solanaChainId = 2;
+        bytes32 victimProgramID = keccak256("victim-solana-program");
+        bytes32 attackerProgramID = keccak256("attacker-solana-program");
+        bytes32 application = makeAddr("settler").toIdentifier();
+        bytes memory payload = bytes("release-funds");
+        bytes32 payloadHash = keccak256(payload);
+
+        // The attacker's proof can only be authenticated as their own program id (Polymer binds returned logs to it).
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = _encodeSolanaLog(application, payload);
+
+        bytes memory mockProof =
+            mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, attackerProgramID, logMessages);
+
+        vm.expectEmit();
+        emit OutputProven(uint256(solanaChainId), attackerProgramID, application, payloadHash);
+        polymerOracle.receiveSolanaMessage(mockProof);
+
+        assertFalse(polymerOracle.isProven(uint256(solanaChainId), victimProgramID, application, payloadHash));
+        assertTrue(polymerOracle.isProven(uint256(solanaChainId), attackerProgramID, application, payloadHash));
+    }
+
+    function test_receiveSolanaMessage_wrong_chain_id_reverts() public {
+        uint32 wrongChainId = 1; // Not Solana (should be 2)
+        bytes32 programID = keccak256("solana-program");
+        bytes32 application = makeAddr("settler").toIdentifier();
+        bytes memory payload = bytes("test-payload");
+
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = _encodeSolanaLog(application, payload);
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(wrongChainId, programID, logMessages);
+
+        vm.expectRevert(PolymerOracle.NotSolanaMessage.selector);
+        polymerOracle.receiveSolanaMessage(mockProof);
+    }
+
+    /// @dev A returned log that is not valid base64 fails closed: `Base64.decode` reverts on any non-base64 character.
+    ///      (Post-fix the whole log IS the base64 blob, so a raw blob is the happy path; only malformed content fails.)
+    function test_receiveSolanaMessage_malformed_base64_reverts() public {
+        uint32 solanaChainId = 2;
+        bytes32 programID = keccak256("solana-program");
+
+        // '@' (0x40) is outside the base64 alphabet.
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = "@@@@";
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
+
+        vm.expectRevert(abi.encodeWithSelector(Base64.InvalidBase64Char.selector, bytes1("@")));
+        polymerOracle.receiveSolanaMessage(mockProof);
+    }
+
+    function test_receiveSolanaMessage_invalid_solana_message_reverts() public {
+        uint32 solanaChainId = 2;
+        bytes32 programID = keccak256("solana-program");
+
+        // Decoded blob shorter than the required application(32) field.
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = mockCrossL2ProverV2.formatSolLogMessage(abi.encodePacked(bytes4(0xdeadbeef)));
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
+
+        vm.expectRevert(PolymerOracle.InvalidSolanaMessage.selector);
+        polymerOracle.receiveSolanaMessage(mockProof);
+    }
+
+    /// @dev Finding 3: a 32-byte blob decodes to `application(32)` with an EMPTY payload; it must be rejected rather
+    ///      than attesting over keccak256("").
+    function test_receiveSolanaMessage_empty_payload_reverts() public {
+        uint32 solanaChainId = 2;
+        bytes32 programID = keccak256("solana-program");
+        bytes32 application = makeAddr("settler").toIdentifier();
+
+        // Exactly 32 bytes: application field only, no payload.
+        string[] memory logMessages = new string[](1);
+        logMessages[0] = mockCrossL2ProverV2.formatSolLogMessage(abi.encodePacked(application));
+
+        bytes memory mockProof = mockCrossL2ProverV2.generateAndEmitSolProof(solanaChainId, programID, logMessages);
+
+        vm.expectRevert(PolymerOracle.InvalidSolanaMessage.selector);
+        polymerOracle.receiveSolanaMessage(mockProof);
+    }
+
+    /// @dev Unit test for the on-chain {Base58} encoder against the known golden program-id vector: the bytes32
+    ///      0x06ddf6...eff00a9 MUST base58-encode to "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" (the same value the
+    ///      golden-fixture log line hard-codes and the oracle's binding depends on).
+    function test_base58_encode_golden_program_id() public pure {
+        bytes32 programID = 0x06ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a9;
+        assertEq(Base58.encode(programID), "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    }
+
+    /// @dev Base58 leading-zero rule: each leading 0x00 byte maps to one leading '1'.
+    function test_base58_encode_leading_zeros() public pure {
+        assertEq(Base58.encode(bytes32(0)), "11111111111111111111111111111111");
+        // 0x00...0001 -> 31 leading '1' + '2' (value 1 is the second alphabet symbol).
+        assertEq(Base58.encode(bytes32(uint256(1))), "11111111111111111111111111111112");
     }
 }

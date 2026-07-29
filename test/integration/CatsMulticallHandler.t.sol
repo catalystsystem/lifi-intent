@@ -16,6 +16,7 @@ import { CatsMulticallHandler } from "../../src/integrations/CatsMulticallHandle
 
 import { IInputSettlerEscrow } from "../../src/interfaces/IInputSettlerEscrow.sol";
 import { MandateOutputEncodingLib } from "../../src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 import { OutputVerificationLib } from "../../src/libs/OutputVerificationLib.sol";
 import { AlwaysYesOracle } from "../mocks/AlwaysYesOracle.sol";
 import { MockERC20 } from "../mocks/MockERC20.sol";
@@ -295,7 +296,7 @@ contract CatsMulticallHandlerTest is Test {
         assertEq(token.balanceOf(solver), 0);
 
         bytes32 orderId = IInputSettlerEscrow(inputSettlerEscrow).orderIdentifier(order);
-        bytes memory payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        bytes memory payload = RefEncodingLib.encodeFillDescriptionMemory(
             solver.toIdentifier(), orderId, uint32(block.timestamp), outputs[0]
         );
         bytes32 payloadHash = keccak256(payload);
@@ -369,7 +370,7 @@ contract CatsMulticallHandlerTest is Test {
         assertEq(token.balanceOf(solver), 0);
 
         bytes32 orderId = IInputSettlerEscrow(inputSettlerEscrow).orderIdentifier(order);
-        bytes memory payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        bytes memory payload = RefEncodingLib.encodeFillDescriptionMemory(
             solver.toIdentifier(), orderId, uint32(block.timestamp), outputs[0]
         );
         bytes32 payloadHash = keccak256(payload);

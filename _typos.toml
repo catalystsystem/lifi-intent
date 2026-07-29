@@ -1,6 +1,10 @@
 [default]
-# TRON USDT contract address; the base58 substring `ot` trips the spell-checker.
-extend-ignore-re = ["TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"]
+extend-ignore-re = [
+    # TRON USDT contract address; the base58 substring `ot` trips the spell-checker.
+    "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+    # Hex fixture whose `ba` suffix trips the spell-checker.
+    "d4f8ba",
+]
 
 [default.extend-words]
 OIF = "OIF"

@@ -316,7 +316,7 @@ contract InputSettlerCompact is InputSettlerPurchase, IInputSettlerCompact {
     }
 
     // @inheritdoc InputSettlerPurchase
-    function _transferInput(
+    function _transferFromSender(
         uint256 tokenId,
         address to,
         uint256 amount

@@ -6,8 +6,10 @@ import { InputSettlerBase } from "OIF/src/input/InputSettlerBase.sol";
 
 import { StandardOrder } from "OIF/src/input/types/StandardOrderType.sol";
 import { MandateOutput, MandateOutputEncodingLib } from "OIF/src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 
 import { InputSettlerEscrowTest } from "OIF/test/input/escrow/InputSettlerEscrow.t.sol";
+import { MockCallbackExecutor } from "test/mocks/MockCallbackExecutor.sol";
 
 contract InputSettlerEscrowLIFIHarness is InputSettlerEscrowLIFI {
     constructor(
@@ -57,7 +59,7 @@ contract inputSettlerEscrowTestBaseLIFI is InputSettlerEscrowTest {
                 output.oracle,
                 output.settler,
                 keccak256(
-                    MandateOutputEncodingLib.encodeFillDescriptionMemory(
+                    RefEncodingLib.encodeFillDescriptionMemory(
                         bytes32(uint256(uint160(callerOfContract))),
                         orderId,
                         uint32(block.timestamp),
@@ -133,7 +135,11 @@ contract inputSettlerEscrowTestBaseLIFI is InputSettlerEscrowTest {
         vm.assume(fee <= MAX_GOVERNANCE_FEE);
         vm.prank(owner);
         InputSettlerEscrowLIFI(inputSettlerEscrow).setGovernanceFee(fee);
-        vm.warp(uint32(block.timestamp) + GOVERNANCE_FEE_CHANGE_DELAY + 1);
+        // Compute the warp target explicitly and reuse it for the expected payload and solve params. Reading
+        // `block.timestamp` AFTER `vm.warp` is unsafe: via-IR can cache the pre-warp value across the cheatcode
+        // (see the note in test_refunds_waive_governance_fee), desyncing the expected fill hash from finalise's.
+        uint32 fillTimestamp = uint32(block.timestamp + GOVERNANCE_FEE_CHANGE_DELAY + 1);
+        vm.warp(fillTimestamp);
         InputSettlerEscrowLIFI(inputSettlerEscrow).applyGovernanceFee();
 
         uint256 amount = 1e18 / 10;
@@ -171,8 +177,8 @@ contract inputSettlerEscrowTestBaseLIFI is InputSettlerEscrowTest {
         InputSettlerEscrowLIFI(inputSettlerEscrow).open(order);
 
         bytes32 orderId = InputSettlerEscrowLIFI(inputSettlerEscrow).orderIdentifier(order);
-        bytes memory payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
-            bytes32(uint256(uint160((solver)))), orderId, uint32(block.timestamp), outputs[0]
+        bytes memory payload = RefEncodingLib.encodeFillDescriptionMemory(
+            bytes32(uint256(uint160((solver)))), orderId, fillTimestamp, outputs[0]
         );
         bytes32 payloadHash = keccak256(payload);
 
@@ -187,9 +193,8 @@ contract inputSettlerEscrowTestBaseLIFI is InputSettlerEscrowTest {
         );
 
         InputSettlerBase.SolveParams[] memory solveParams = new InputSettlerBase.SolveParams[](1);
-        solveParams[0] = InputSettlerBase.SolveParams({
-            timestamp: uint32(block.timestamp), solver: bytes32(uint256(uint160((solver))))
-        });
+        solveParams[0] =
+            InputSettlerBase.SolveParams({ timestamp: fillTimestamp, solver: bytes32(uint256(uint160((solver)))) });
 
         vm.prank(solver);
         InputSettlerEscrowLIFI(inputSettlerEscrow)
@@ -201,5 +206,141 @@ contract inputSettlerEscrowTestBaseLIFI is InputSettlerEscrowTest {
 
         assertEq(token.balanceOf(solver), amountPostFee);
         assertEq(token.balanceOf(InputSettlerEscrowLIFI(inputSettlerEscrow).owner()), govFeeAmount);
+    }
+
+    /// @dev The governance fee is waived on refunds: a failed intent returns the user's full inputs on both the
+    /// expiry-based refund and the proof-based refundOnNonFill, even with a fee configured.
+    function test_refunds_waive_governance_fee(
+        uint64 fee
+    ) public {
+        vm.assume(fee > 0 && fee <= MAX_GOVERNANCE_FEE);
+        vm.prank(owner);
+        InputSettlerEscrowLIFI(inputSettlerEscrow).setGovernanceFee(fee);
+        vm.warp(uint32(block.timestamp) + GOVERNANCE_FEE_CHANGE_DELAY + 1);
+        InputSettlerEscrowLIFI(inputSettlerEscrow).applyGovernanceFee();
+
+        uint128 amount = 1e18 / 10;
+
+        // Expiry-based refund.
+        uint32 fillDeadline = uint32(block.timestamp + 10 minutes);
+        (StandardOrder memory order,) =
+            _openOrderForNonFill(alwaysYesOracle, fillDeadline, uint32(block.timestamp + 5 hours), amount);
+        uint256 balanceBefore = token.balanceOf(swapper);
+        vm.warp(order.expires + 1);
+        InputSettlerEscrowLIFI(inputSettlerEscrow).refund(order);
+        assertEq(token.balanceOf(swapper), balanceBefore + amount, "expiry refund must be feeless");
+        assertEq(token.balanceOf(owner), 0);
+
+        // Proof-based quick refund. Timestamps derive from the warped-to time rather than re-reading
+        // block.timestamp, which via-IR may cache across vm.warp within the same test frame.
+        uint32 warpedTo = order.expires + 1;
+        fillDeadline = warpedTo + 10 minutes;
+        (order,) = _openOrderForNonFill(alwaysYesOracle, fillDeadline, warpedTo + 5 hours, amount);
+        balanceBefore = token.balanceOf(swapper);
+        vm.warp(fillDeadline + 1);
+        InputSettlerEscrowLIFI(inputSettlerEscrow).refundOnNonFill(order, 0);
+        assertEq(token.balanceOf(swapper), balanceBefore + amount, "non-fill refund must be feeless");
+        assertEq(token.balanceOf(owner), 0);
+    }
+
+    function _openOrderForCallback(
+        address inputOracle,
+        uint256 amount
+    ) internal returns (StandardOrder memory order) {
+        MandateOutput[] memory outputs = new MandateOutput[](1);
+        outputs[0] = MandateOutput({
+            settler: bytes32(uint256(uint160(address(outputSettlerCoin)))),
+            oracle: bytes32(uint256(uint160(inputOracle))),
+            chainId: block.chainid,
+            token: bytes32(uint256(uint160(address(anotherToken)))),
+            amount: amount,
+            recipient: bytes32(uint256(uint160(swapper))),
+            callbackData: hex"",
+            context: hex""
+        });
+        uint256[2][] memory inputs = new uint256[2][](1);
+        inputs[0] = [uint256(uint160(address(token))), amount];
+
+        order = StandardOrder({
+            user: swapper,
+            nonce: 0,
+            originChainId: block.chainid,
+            expires: type(uint32).max,
+            fillDeadline: type(uint32).max,
+            inputOracle: inputOracle,
+            inputs: inputs,
+            outputs: outputs
+        });
+
+        vm.prank(swapper);
+        token.approve(inputSettlerEscrow, amount);
+        vm.prank(swapper);
+        InputSettlerEscrowLIFI(inputSettlerEscrow).open(order);
+    }
+
+    function test_finalise_callback_receives_net_inputs(
+        uint64 fee
+    ) public {
+        vm.assume(fee <= MAX_GOVERNANCE_FEE);
+        vm.prank(owner);
+        InputSettlerEscrowLIFI(inputSettlerEscrow).setGovernanceFee(fee);
+        uint32 fillTimestamp = uint32(block.timestamp + GOVERNANCE_FEE_CHANGE_DELAY + 1);
+        vm.warp(fillTimestamp);
+        InputSettlerEscrowLIFI(inputSettlerEscrow).applyGovernanceFee();
+
+        uint256 amount = 1e18 / 10;
+        MockCallbackExecutor callbackDest = new MockCallbackExecutor();
+        StandardOrder memory order = _openOrderForCallback(address(alwaysYesOracle), amount);
+
+        uint256 govFeeAmount = (amount * fee) / 10 ** 18;
+        uint256[2][] memory expectedNet = new uint256[2][](1);
+        expectedNet[0] = [uint256(uint160(address(token))), amount - govFeeAmount];
+
+        bytes memory call = hex"c0ffee";
+
+        InputSettlerBase.SolveParams[] memory solveParams = new InputSettlerBase.SolveParams[](1);
+        solveParams[0] =
+            InputSettlerBase.SolveParams({ timestamp: fillTimestamp, solver: bytes32(uint256(uint160((solver)))) });
+
+        // The callback must be invoked with the net delivered amounts, not the gross order inputs.
+        vm.expectCall(
+            address(callbackDest), abi.encodeWithSignature("orderFinalised(uint256[2][],bytes)", expectedNet, call)
+        );
+
+        vm.prank(solver);
+        InputSettlerEscrowLIFI(inputSettlerEscrow)
+            .finalise(order, solveParams, bytes32(uint256(uint160(address(callbackDest)))), call);
+
+        // The destination holds exactly the net amount that was reported to it.
+        assertEq(token.balanceOf(address(callbackDest)), amount - govFeeAmount);
+        assertEq(token.balanceOf(owner), govFeeAmount);
+    }
+
+    /// @dev Regression: with no governance fee configured, the callback still receives the full gross inputs.
+    function test_finalise_callback_gross_inputs_when_no_fee() public {
+        uint256 amount = 1e18 / 10;
+        MockCallbackExecutor callbackDest = new MockCallbackExecutor();
+        StandardOrder memory order = _openOrderForCallback(address(alwaysYesOracle), amount);
+
+        uint256[2][] memory expectedGross = new uint256[2][](1);
+        expectedGross[0] = [uint256(uint160(address(token))), amount];
+
+        bytes memory call = hex"c0ffee";
+
+        InputSettlerBase.SolveParams[] memory solveParams = new InputSettlerBase.SolveParams[](1);
+        solveParams[0] = InputSettlerBase.SolveParams({
+            timestamp: uint32(block.timestamp), solver: bytes32(uint256(uint160((solver))))
+        });
+
+        vm.expectCall(
+            address(callbackDest), abi.encodeWithSignature("orderFinalised(uint256[2][],bytes)", expectedGross, call)
+        );
+
+        vm.prank(solver);
+        InputSettlerEscrowLIFI(inputSettlerEscrow)
+            .finalise(order, solveParams, bytes32(uint256(uint160(address(callbackDest)))), call);
+
+        assertEq(token.balanceOf(address(callbackDest)), amount);
+        assertEq(token.balanceOf(owner), 0);
     }
 }

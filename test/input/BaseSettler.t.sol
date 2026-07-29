@@ -13,7 +13,10 @@ import { OrderPurchase, OrderPurchaseType } from "../../src/input/types/OrderPur
 import { StandardOrder } from "../../src/input/types/StandardOrderType.sol";
 import { LibAddress } from "../../src/libs/LibAddress.sol";
 import { MandateOutputEncodingLib } from "../../src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 import { EIP712 } from "openzeppelin/utils/cryptography/EIP712.sol";
+import { IERC20 } from "openzeppelin/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "openzeppelin/token/ERC20/utils/SafeERC20.sol";
 
 contract MockSettler is InputSettlerPurchase {
     constructor() EIP712("MockSettler", "-1") { }
@@ -44,6 +47,10 @@ contract MockSettler is InputSettlerPurchase {
         InputSettlerBase.SolveParams[] calldata solveParams
     ) external view {
         _validateFills(fillDeadline, inputOracle, outputs, orderId, solveParams);
+    }
+
+    function _transferFromSender(uint256 tokenId, address to, uint256 amount) internal override {
+        SafeERC20.safeTransferFrom(IERC20(LibAddress.validatedCleanAddress(tokenId)), msg.sender, to, amount);
     }
 }
 
@@ -158,7 +165,7 @@ contract BaseInputSettlerTest is Test {
                 MandateOutputs[i].oracle,
                 MandateOutputs[i].settler,
                 keccak256(
-                    MandateOutputEncodingLib.encodeFillDescriptionMemory(
+                    RefEncodingLib.encodeFillDescriptionMemory(
                         solverIdentifier, orderId, solveParams[i].timestamp, MandateOutputs[i]
                     )
                 )
@@ -245,7 +252,7 @@ contract BaseInputSettlerTest is Test {
                 MandateOutputs[i].oracle,
                 MandateOutputs[i].settler,
                 keccak256(
-                    MandateOutputEncodingLib.encodeFillDescriptionMemory(
+                    RefEncodingLib.encodeFillDescriptionMemory(
                         solveParams[i].solver, orderId, solveParams[i].timestamp, MandateOutputs[i]
                     )
                 )

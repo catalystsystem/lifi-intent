@@ -57,6 +57,10 @@ abstract contract InputSettlerBase is EIP712 {
      * @dev Fill deadline is after expiry deadline.
      */
     error FillDeadlineAfterExpiry(uint32 fillDeadline, uint32 expires);
+    /**
+     * @dev `order.user` is the zero address.
+     */
+    error UserIsZero();
 
     /**
      * @notice Emitted when an order is finalised.
@@ -80,6 +84,16 @@ abstract contract InputSettlerBase is EIP712 {
     }
 
     // --- Validation --- //
+
+    /**
+     * @notice Validates that the order's user is non-zero.
+     * @dev `order.user` is the refund recipient; refunds to the zero address would be burned.
+     */
+    function _validateUser(
+        address user
+    ) internal pure {
+        if (user == address(0)) revert UserIsZero();
+    }
 
     /**
      * @notice Checks that a timestamp has not expired.
@@ -201,7 +215,31 @@ abstract contract InputSettlerBase is EIP712 {
         uint32 timestamp,
         MandateOutput calldata output
     ) internal pure returns (bytes32 outputHash) {
-        return keccak256(MandateOutputEncodingLib.encodeFillDescription(solver, orderId, timestamp, output));
+        return MandateOutputEncodingLib.hashFillDescription(solver, orderId, timestamp, output);
+    }
+
+    /**
+     * @notice Check if a single output has been proven as not filled before the order's fill deadline.
+     * @dev The mirror of `_validateFills` for a non-fill: reconstructs the not-filled payload hash from the SIGNED
+     * order parameters (a proof attested against any other deadline or output simply does not validate) and requires
+     * it proven on the input oracle under the same (chainId, oracle, settler) tuple fills use.
+     * A single proven non-fill is sufficient to refund a whole order: finalise requires every output proven filled,
+     * so one permanently-missing output makes finalise impossible.
+     * @param fillDeadline The fill deadline of the order (from the signed order).
+     * @param inputOracle The input oracle to consult.
+     * @param output The output that was not filled.
+     * @param orderId The unique identifier of the order.
+     */
+    function _validateNonFill(
+        uint32 fillDeadline,
+        address inputOracle,
+        MandateOutput calldata output,
+        bytes32 orderId
+    ) internal view {
+        bytes32 payloadHash = MandateOutputEncodingLib.hashNotFilledDescription(orderId, fillDeadline, output);
+
+        bytes memory proofSeries = abi.encodePacked(output.chainId, output.oracle, output.settler, payloadHash);
+        IInputOracle(inputOracle).efficientRequireProven(proofSeries);
     }
 
     /**

@@ -5,6 +5,7 @@ import { MandateOutput } from "../../../src/input/types/MandateOutputType.sol";
 import { BroadcasterOracle } from "../../../src/integrations/oracles/broadcaster/BroadcasterOracle.sol";
 import { LibAddress } from "../../../src/libs/LibAddress.sol";
 import { MandateOutputEncodingLib } from "../../../src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 import { MessageEncodingLib } from "../../../src/libs/MessageEncodingLib.sol";
 import { BaseInputOracle } from "../../../src/oracles/BaseInputOracle.sol";
 import { OutputSettlerBase } from "../../../src/output/OutputSettlerBase.sol";
@@ -107,15 +108,18 @@ contract BroadcasterOracleTest is Test {
             context: bytes("")
         });
 
-        payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        // The recorded storage proof (broadcast_proof_block_9706376.json) was produced from a Sepolia broadcast of a
+        // legacy untagged fill description. The broadcaster transport is payload-agnostic — it only ever hashes the
+        // payload — so the fixture stays valid with the payload reproduced verbatim in its original untagged layout.
+        payload = abi.encodePacked(
             filler.toIdentifier(),
             keccak256(bytes("orderId")),
             uint32(1764104508),
             output.token,
             output.amount,
             output.recipient,
-            bytes(""),
-            bytes("")
+            uint16(0), // callbackData length
+            uint16(0) // context length
         );
 
         return (payload, broadcasterOracleSubmitter, outputSettler);
@@ -197,7 +201,7 @@ contract BroadcasterOracleTest is Test {
         outputSettler.fill(orderId, output, type(uint48).max, fillerData);
 
         bytes[] memory payloads = new bytes[](1);
-        payloads[0] = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        payloads[0] = RefEncodingLib.encodeFillDescriptionMemory(
             filler.toIdentifier(),
             orderId,
             uint32(block.timestamp),
@@ -253,7 +257,7 @@ contract BroadcasterOracleTest is Test {
         outputSettler.fill(orderId, output, type(uint48).max, fillerData);
 
         bytes[] memory payloads = new bytes[](1);
-        payloads[0] = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        payloads[0] = RefEncodingLib.encodeFillDescriptionMemory(
             filler.toIdentifier(),
             orderId,
             uint32(block.timestamp),
@@ -286,7 +290,7 @@ contract BroadcasterOracleTest is Test {
 
         bytes[] memory payloads = new bytes[](1);
 
-        payloads[0] = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        payloads[0] = RefEncodingLib.encodeFillDescriptionMemory(
             bytes32(0),
             keccak256(bytes("orderId")),
             uint32(block.timestamp),

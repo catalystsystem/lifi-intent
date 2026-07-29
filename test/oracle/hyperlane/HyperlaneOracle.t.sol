@@ -8,10 +8,15 @@ import { console2 } from "forge-std/console2.sol";
 import { MandateOutput } from "../../../src/input/types/MandateOutputType.sol";
 import { LibAddress } from "../../../src/libs/LibAddress.sol";
 import { MandateOutputEncodingLib } from "../../../src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 import { MessageEncodingLib } from "../../../src/libs/MessageEncodingLib.sol";
 import { OutputSettlerSimple } from "../../../src/output/simple/OutputSettlerSimple.sol";
 import { MockCallbackExecutor } from "../../mocks/MockCallbackExecutor.sol";
 import { MockERC20 } from "../../mocks/MockERC20.sol";
+
+import { InputSettlerEscrow } from "../../../src/input/escrow/InputSettlerEscrow.sol";
+import { StandardOrder } from "../../../src/input/types/StandardOrderType.sol";
+import { IInputSettlerEscrow } from "../../../src/interfaces/IInputSettlerEscrow.sol";
 
 import { HyperlaneOracle } from "../../../src/integrations/oracles/hyperlane/HyperlaneOracle.sol";
 import {
@@ -97,7 +102,7 @@ contract HyperlaneOracleTest is Test {
             context: bytes("")
         });
 
-        payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        payload = RefEncodingLib.encodeFillDescriptionMemory(
             solverIdentifier,
             orderId,
             uint32(block.timestamp),
@@ -158,7 +163,7 @@ contract HyperlaneOracleTest is Test {
         vm.prank(sender);
         _token.approve(address(_outputSettler), amount);
 
-        // encodeFillDescription header is 168 bytes; combined body > type(uint16).max - 168 produces a payload that
+        // encodeFillDescription header is 172 bytes; combined body > type(uint16).max - 172 produces a payload that
         // MessageEncodingLib cannot encode through its uint16 length prefix.
         bytes memory tooLargeCallback = new bytes(65368);
 
@@ -173,7 +178,7 @@ contract HyperlaneOracleTest is Test {
             context: bytes("")
         });
 
-        bytes memory payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        bytes memory payload = RefEncodingLib.encodeFillDescriptionMemory(
             solverIdentifier,
             orderId,
             uint32(block.timestamp),
@@ -418,4 +423,88 @@ contract HyperlaneOracleTest is Test {
     }
 
     receive() external payable { }
+
+    /// @dev End-to-end quick refund over the Hyperlane (push) rail — zero oracle contract changes:
+    /// the output settler live-validates the not-filled payload inside hasAttested during submit,
+    /// the message is delivered through handle, and refundOnNonFill consumes the attestation
+    /// before order.expires.
+    function test_submit_notFilled_and_refundOnNonFill() external {
+        address swapper = makeAddr("swapper");
+        uint256 amount = 1e18 / 10;
+
+        // Escrow order on the "origin" side of this single-chain e2e.
+        InputSettlerEscrow inputSettler = new InputSettlerEscrow();
+        MockERC20 inputToken = new MockERC20("IN", "IN", 18);
+        inputToken.mint(swapper, amount);
+        vm.prank(swapper);
+        inputToken.approve(address(inputSettler), amount);
+
+        MandateOutput[] memory outputs = new MandateOutput[](1);
+        outputs[0] = MandateOutput({
+            oracle: address(_oracle).toIdentifier(),
+            settler: address(_outputSettler).toIdentifier(),
+            chainId: block.chainid,
+            token: bytes32(abi.encode(address(_token))),
+            amount: amount,
+            recipient: swapper.toIdentifier(),
+            callbackData: bytes(""),
+            context: bytes("")
+        });
+        uint256[2][] memory inputs = new uint256[2][](1);
+        inputs[0] = [uint256(uint160(address(inputToken))), amount];
+
+        uint32 fillDeadline = uint32(block.timestamp + 10 minutes);
+        StandardOrder memory order = StandardOrder({
+            user: swapper,
+            nonce: 0,
+            originChainId: block.chainid,
+            expires: uint32(block.timestamp + 5 hours),
+            fillDeadline: fillDeadline,
+            inputOracle: address(_oracle),
+            inputs: inputs,
+            outputs: outputs
+        });
+        vm.prank(swapper);
+        IInputSettlerEscrow(address(inputSettler)).open(order);
+        bytes32 orderId = IInputSettlerEscrow(address(inputSettler)).orderIdentifier(order);
+        assertEq(inputToken.balanceOf(swapper), 0);
+
+        bytes[] memory payloads = new bytes[](1);
+        payloads[0] =
+            RefEncodingLib.encodeNotFilledDescriptionMemory(orderId, fillDeadline, outputs[0]);
+
+        // Before the deadline the live validation rejects the non-fill.
+        vm.expectRevert(abi.encodeWithSignature("NotAllPayloadsValid()"));
+        _oracle.submit{ value: _gasPaymentQuote }(
+            _destination, _recipientOracle, _gasLimit, bytes(""), address(_outputSettler), payloads
+        );
+
+        // Nobody fills; the deadline passes. Submit now live-validates.
+        vm.warp(uint256(fillDeadline) + 1);
+        _oracle.submit{ value: _gasPaymentQuote }(
+            _destination, _recipientOracle, _gasLimit, bytes(""), address(_outputSettler), payloads
+        );
+
+        // Delivery: the mailbox hands the message to the origin-side oracle. The remote sender
+        // is the (same-address) output-chain HyperlaneOracle, matching output.oracle in the
+        // proof tuple the input settler validates.
+        bytes memory message = this.encodeMessageCalldata(address(_outputSettler).toIdentifier(), payloads);
+        vm.prank(address(_mailbox));
+        _oracle.handle(uint32(block.chainid), address(_oracle).toIdentifier(), message);
+
+        // The attestation is stored under the exact (chainId, oracle, settler, hash) tuple.
+        assertTrue(
+            _oracle.isProven(
+                block.chainid,
+                address(_oracle).toIdentifier(),
+                address(_outputSettler).toIdentifier(),
+                keccak256(payloads[0])
+            )
+        );
+
+        // The refund consumes it, well before order.expires.
+        IInputSettlerEscrow(address(inputSettler)).refundOnNonFill(order, 0);
+        assertLt(block.timestamp, order.expires);
+        assertEq(inputToken.balanceOf(swapper), amount);
+    }
 }

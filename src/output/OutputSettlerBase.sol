@@ -68,8 +68,8 @@ import { BaseInputOracle } from "../oracles/BaseInputOracle.sol";
  *        They should understand the risks of each callback and the potential for them to revert the filling of the
  * output, which could lead to the solver not being able to finalise the order.
  * 2. Oversized fill descriptions: some oracles cannot transport fill descriptions larger than
- * `type(uint16).max` bytes (168-byte header + `callbackData` + `context`).
- *    - Mitigation: solvers MUST reject outputs where `callbackData.length + context.length > type(uint16).max - 168`.
+ * `type(uint16).max` bytes (172-byte header + `callbackData` + `context`).
+ *    - Mitigation: solvers MUST reject outputs where `callbackData.length + context.length > type(uint16).max - 172`.
  */
 abstract contract OutputSettlerBase is IAttester, BaseInputOracle {
     using LibAddress for bytes32;
@@ -77,12 +77,16 @@ abstract contract OutputSettlerBase is IAttester, BaseInputOracle {
 
     /// @dev Fill deadline has passed
     error FillDeadline();
+    /// @dev Fill deadline has not passed yet
+    error FillDeadlineNotPassed();
     /// @dev Attempting to fill an output that has already been filled by a different solver
     error AlreadyFilled();
     /// @dev Oracle attestation doesn't match stored fill record
     error InvalidAttestation(bytes32 storedFillRecordHash, bytes32 givenFillRecordHash);
-    /// @dev Payload is too small to be a valid fill description
+    /// @dev Payload is too small to be a valid fill or not-filled description
     error PayloadTooSmall();
+    /// @dev Payload does not lead with a known domain magic
+    error InvalidPayloadMagic(bytes4 magic);
 
     /**
      * @notice Sets outputs as filled by their solver identifier, such that outputs won't be filled twice.
@@ -95,6 +99,17 @@ abstract contract OutputSettlerBase is IAttester, BaseInputOracle {
     event OutputFilled(
         bytes32 indexed orderId, bytes32 solver, uint32 timestamp, MandateOutput output, uint256 finalAmount
     );
+
+    /**
+     * @notice Emitted when an output is attested as not filled before its fill deadline. Only needed by event-coupled
+     * oracles; push oracles validate non-fills live through `hasAttested`.
+     * @dev `fillDeadline` is caller-supplied; indexing on orderId & output cannot be trusted as is. `fillDeadline`
+     * has to be validated to match the original order.
+     * Reorg protection is shared between oracles & this contract:
+     * - If a reorg inserts a fill() before emitNotFilled(), then emitNotFilled() would fail and not emit.
+     * - If a reorg inserts a fill() after emitNotFilled(), then fill() would fail with FillDeadline.
+     */
+    event OutputNotFilled(bytes32 indexed orderId, MandateOutput output, uint32 fillDeadline);
 
     /**
      * @dev Computes the fill record hash for a given solver and timestamp.
@@ -282,35 +297,93 @@ abstract contract OutputSettlerBase is IAttester, BaseInputOracle {
         if (msg.value > nativeSent) Address.sendValue(payable(msg.sender), msg.value - nativeSent);
     }
 
+    // --- Non-Fill Attestation --- //
+
+    /**
+     * @notice Emits an attestable event that an output was not filled before its fill deadline, for event-coupled
+     * oracles (Polymer). Push oracles do not need this: their `submit` path validates non-fills live through
+     * `hasAttested`.
+     * @dev Permissionless and emit-only — this function NEVER writes `_fillRecords` (or any storage), so `fill()` is
+     * completely unaffected by it. Writing a marker would let anyone block legitimate fills with a fabricated early
+     * deadline. Duplicate emits are harmless.
+     * A fabricated `fillDeadline` produces a payload hash the signed order never references: input settlers
+     * must reconstructs the hash from the signed `order.fillDeadline`, so such an attestation is inert.
+     * @param orderId The unique identifier of the order.
+     * @param output The `MandateOutput` that was not filled. Must target this settler on this chain.
+     * @param fillDeadline The fill deadline of the order. `block.timestamp` must exceed it. Must exactly match order of orderId.
+     */
+    function emitNotFilled(
+        bytes32 orderId,
+        MandateOutput calldata output,
+        uint32 fillDeadline
+    ) external {
+        OutputVerificationLib._isThisChain(output.chainId);
+        OutputVerificationLib._isThisOutputSettler(output.settler);
+        LibAddress.validatedCleanAddress(uint256(output.oracle));
+        if (block.timestamp <= uint256(fillDeadline)) revert FillDeadlineNotPassed();
+
+        bytes32 outputHash = MandateOutputEncodingLib.getMandateOutputHash(output);
+        if (_fillRecords[orderId][outputHash] != bytes32(0)) revert AlreadyFilled();
+
+        emit OutputNotFilled(orderId, output, fillDeadline);
+    }
+
     // --- IAttester --- //
 
     /**
      * @notice Helper function to check whether a payload is valid.
-     * @dev Works by checking if the entirety of the payload has been recorded as valid. Every byte of the payload is
-     * checked to ensure the payload has been filled.
-     * @param payload keccak256 hash of the relevant payload.
-     * @return bool Whether or not the payload has been recorded as filled.
+     * @dev Dispatches strictly on the leading 4-byte domain magic — fill and not-filled descriptions can never be
+     * cross-consumed. Payloads without a known magic revert; there is no untagged-payload fallback.
+     * - Fill: every byte of the payload is checked against the stored fill record.
+     * - Not filled: validated live against current state — no fill record exists and the deadline has passed.
+     *   Because fills are frozen after the deadline, this fact is permanent once true. Reorg protection comes from
+     *   the proving oracle's finality rule.
+     * @param payload The full proof payload to validate.
+     * @return bool Whether or not the payload is attested to by this settler.
      */
     function _isPayloadValid(
         bytes calldata payload
     ) internal view virtual returns (bool) {
-        // Check if the payload is large enough for it to be a fill description.
-        if (payload.length < 168) revert PayloadTooSmall();
-        bytes32 outputHash = MandateOutputEncodingLib.getMandateOutputHashFromCommonPayload(
-            bytes32(uint256(uint160(msg.sender))), // Oracle
-            bytes32(uint256(uint160(address(this)))), // Settler
-            block.chainid,
-            payload[68:]
-        );
-        bytes32 payloadOrderId = MandateOutputEncodingLib.loadOrderIdFromFillDescription(payload);
-        bytes32 fillRecord = _fillRecords[payloadOrderId][outputHash];
+        if (payload.length < 4) revert PayloadTooSmall();
+        bytes4 magic = bytes4(payload[0:4]);
 
-        // Get the expected record based on the fillDescription (payload).
-        bytes32 payloadSolver = MandateOutputEncodingLib.loadSolverFromFillDescription(payload);
-        uint32 payloadTimestamp = MandateOutputEncodingLib.loadTimestampFromFillDescription(payload);
-        bytes32 expectedFillRecord = _getFillRecordHash(payloadSolver, payloadTimestamp);
+        if (magic == MandateOutputEncodingLib.FILL_MAGIC) {
+            // Check if the payload is large enough for it to be a fill description.
+            if (payload.length < MandateOutputEncodingLib.FILL_DESCRIPTION_MIN_LENGTH) revert PayloadTooSmall();
+            bytes32 outputHash = MandateOutputEncodingLib.getMandateOutputHashFromCommonPayload(
+                bytes32(uint256(uint160(msg.sender))), // Oracle
+                bytes32(uint256(uint160(address(this)))), // Settler
+                block.chainid,
+                payload[MandateOutputEncodingLib.FILL_COMMON_PAYLOAD_OFFSET:]
+            );
+            bytes32 payloadOrderId = MandateOutputEncodingLib.loadOrderIdFromFillDescription(payload);
+            bytes32 fillRecord = _fillRecords[payloadOrderId][outputHash];
 
-        return fillRecord == expectedFillRecord;
+            // Get the expected record based on the fillDescription (payload).
+            bytes32 payloadSolver = MandateOutputEncodingLib.loadSolverFromFillDescription(payload);
+            uint32 payloadTimestamp = MandateOutputEncodingLib.loadTimestampFromFillDescription(payload);
+            bytes32 expectedFillRecord = _getFillRecordHash(payloadSolver, payloadTimestamp);
+
+            return fillRecord == expectedFillRecord;
+        }
+
+        if (magic == MandateOutputEncodingLib.NOT_FILLED_MAGIC) {
+            // Check if the payload is large enough for it to be a not-filled description.
+            if (payload.length < MandateOutputEncodingLib.NOT_FILLED_DESCRIPTION_MIN_LENGTH) revert PayloadTooSmall();
+            bytes32 outputHash = MandateOutputEncodingLib.getMandateOutputHashFromCommonPayload(
+                bytes32(uint256(uint160(msg.sender))), // Oracle
+                bytes32(uint256(uint160(address(this)))), // Settler
+                block.chainid,
+                payload[MandateOutputEncodingLib.NOT_FILLED_COMMON_PAYLOAD_OFFSET:]
+            );
+            bytes32 payloadOrderId = MandateOutputEncodingLib.loadOrderIdFromNotFilledDescription(payload);
+            uint32 payloadFillDeadline = MandateOutputEncodingLib.loadFillDeadlineFromNotFilledDescription(payload);
+
+            if (_fillRecords[payloadOrderId][outputHash] != bytes32(0)) return false;
+            return block.timestamp > uint256(payloadFillDeadline);
+        }
+
+        revert InvalidPayloadMagic(magic);
     }
 
     /**
@@ -348,7 +421,7 @@ abstract contract OutputSettlerBase is IAttester, BaseInputOracle {
             revert InvalidAttestation(existingFillRecordHash, givenFillRecordHash);
         }
 
-        bytes32 dataHash = keccak256(MandateOutputEncodingLib.encodeFillDescription(solver, orderId, timestamp, output));
+        bytes32 dataHash = MandateOutputEncodingLib.hashFillDescription(solver, orderId, timestamp, output);
 
         // Check that we set the mapping correctly.
         bytes32 attester = output.settler;

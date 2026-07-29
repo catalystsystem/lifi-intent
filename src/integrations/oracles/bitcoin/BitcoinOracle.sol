@@ -406,7 +406,7 @@ contract BitcoinOracle is BaseInputOracle {
         bytes32 solver = _resolveClaimed(timestamp, orderId, output);
 
         bytes32 fillDescriptionHash =
-            keccak256(MandateOutputEncodingLib.encodeFillDescription(solver, orderId, uint32(timestamp), output));
+            MandateOutputEncodingLib.hashFillDescription(solver, orderId, uint32(timestamp), output);
         _attestations[block.chainid][output.oracle][address(this).toIdentifier()][fillDescriptionHash] = true;
 
         emit OutputFilled(orderId, solver, uint32(timestamp), output, output.amount);
@@ -630,9 +630,8 @@ contract BitcoinOracle is BaseInputOracle {
         if (claimedOrder.disputer != address(0)) revert Disputed();
 
         bytes32 solver = claimedOrder.solver;
-        bytes32 outputHash = keccak256(
-            MandateOutputEncodingLib.encodeFillDescription(solver, orderId, uint32(claimedOrder.claimTimestamp), output)
-        );
+        bytes32 outputHash =
+            MandateOutputEncodingLib.hashFillDescription(solver, orderId, uint32(claimedOrder.claimTimestamp), output);
         _attestations[block.chainid][output.oracle][address(this).toIdentifier()][outputHash] = true;
         emit OutputFilled(orderId, solver, uint32(claimedOrder.claimTimestamp), output, output.amount);
 

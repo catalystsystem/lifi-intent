@@ -12,11 +12,11 @@ interface IInputSettlerEscrow {
         StandardOrder calldata order,
         address sponsor,
         bytes calldata signature
-    ) external;
+    ) external payable;
 
     function open(
         StandardOrder calldata order
-    ) external;
+    ) external payable;
 
     function finalise(
         StandardOrder calldata order,
@@ -33,6 +33,26 @@ interface IInputSettlerEscrow {
         bytes calldata orderOwnerSignature
     ) external;
 
+    /**
+     * @notice Refunds an order that has not been finalised before it expired. This order may have been filled but
+     * finalise has not been called yet.
+     * @param order StandardOrder description of the intent.
+     */
+    function refund(
+        StandardOrder calldata order
+    ) external;
+
+    /**
+     * @notice Refunds an order as soon as any one of its outputs is proven not filled before the order's fill
+     * deadline — without waiting for `order.expires`. The time-based `refund` remains available as the backstop.
+     * @param order StandardOrder description of the intent.
+     * @param outputIndex Index of the output proven not filled.
+     */
+    function refundOnNonFill(
+        StandardOrder calldata order,
+        uint256 outputIndex
+    ) external;
+
     function orderIdentifier(
         StandardOrder memory order
     ) external view returns (bytes32);
@@ -44,5 +64,5 @@ interface IInputSettlerEscrow {
         bytes32 purchaser,
         uint256 expiryTimestamp,
         bytes memory solverSignature
-    ) external;
+    ) external payable;
 }

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.26;
 
-import { SafeTransferLib } from "solady/utils/SafeTransferLib.sol";
-
 import { InputSettlerEscrow } from "OIF/src/input/escrow/InputSettlerEscrow.sol";
 import { MandateOutput } from "OIF/src/input/types/MandateOutputType.sol";
 import { StandardOrder, StandardOrderType } from "OIF/src/input/types/StandardOrderType.sol";
@@ -123,7 +121,7 @@ contract InputSettlerEscrowLIFI is InputSettlerEscrow, GovernanceFee {
         emit Finalised(orderId, msg.sender.toIdentifier(), destination.toIdentifier());
 
         // Call the destination (if needed) so the caller can inject logic into our call.
-        if (call.length > 0) IInputCallback(destination).orderFinalised(inputs, call);
+        if (call.length > 0) IInputCallback(destination).orderFinalised(_netInputs(inputs), call);
 
         // Validate the fill. The solver may use the reentrance of the above line to execute the fill.
         _validateFillsNow(order.inputOracle, order.outputs, orderId);
@@ -156,7 +154,9 @@ contract InputSettlerEscrowLIFI is InputSettlerEscrow, GovernanceFee {
 
         _finalise(order, orderId, solveParams[0].solver, destination);
 
-        if (call.length > 0) IInputCallback(destination.fromIdentifier()).orderFinalised(order.inputs, call);
+        if (call.length > 0) {
+            IInputCallback(destination.fromIdentifier()).orderFinalised(_netInputs(order.inputs), call);
+        }
 
         _validateFills(order.fillDeadline, order.inputOracle, order.outputs, orderId, solveParams);
     }
@@ -193,7 +193,9 @@ contract InputSettlerEscrowLIFI is InputSettlerEscrow, GovernanceFee {
 
         _finalise(order, orderId, solveParams[0].solver, destination);
 
-        if (call.length > 0) IInputCallback(destination.fromIdentifier()).orderFinalised(order.inputs, call);
+        if (call.length > 0) {
+            IInputCallback(destination.fromIdentifier()).orderFinalised(_netInputs(order.inputs), call);
+        }
 
         _validateFills(order.fillDeadline, order.inputOracle, order.outputs, orderId, solveParams);
     }
@@ -203,6 +205,8 @@ contract InputSettlerEscrowLIFI is InputSettlerEscrow, GovernanceFee {
     /**
      * @dev This function employs a local reentry guard: we check the order status and then we update it afterwards.
      * This is an important check as it is intended to process external ERC20 transfers.
+     * The governance fee is waived on refunds — a failed intent returns the user's full inputs, on both the
+     * expiry-based `refund` and the proof-based `refundOnNonFill` paths.
      * @param newStatus specifies the new status to set the order to. Should never be OrderStatus.Deposited.
      */
     function _resolveLock(
@@ -218,27 +222,23 @@ contract InputSettlerEscrowLIFI is InputSettlerEscrow, GovernanceFee {
         orderStatus[orderId] = newStatus;
 
         address _owner = owner();
-        uint64 fee = _owner != address(0) ? governanceFee : 0;
+        uint64 fee = (_owner != address(0) && newStatus != OrderStatus.Refunded) ? governanceFee : 0;
         // We have now ensured that this point can only be reached once. We can now process the asset delivery.
         uint256 numInputs = inputs.length;
         for (uint256 i; i < numInputs; ++i) {
             uint256[2] memory input = inputs[i];
-            address token = input[0].fromIdentifier();
+            uint256 tokenId = input[0];
             uint256 amount = input[1];
 
             uint256 calculatedFee = _calcFee(amount, fee);
             if (calculatedFee > 0) {
-                _transfer(token, _owner, calculatedFee);
+                _sendInputAsset(tokenId, _owner, calculatedFee);
                 unchecked {
                     amount = amount - calculatedFee;
                 }
             }
 
-            _transfer(token, destination, amount);
+            _sendInputAsset(tokenId, destination, amount);
         }
-    }
-
-    function _transfer(address token, address to, uint256 amount) internal virtual override {
-        SafeTransferLib.safeTransfer(token, to, amount);
     }
 }

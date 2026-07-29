@@ -3,6 +3,7 @@ pragma solidity ^0.8.26;
 
 import { IERC20 } from "openzeppelin/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "openzeppelin/token/ERC20/utils/SafeERC20.sol";
+import { Address } from "openzeppelin/utils/Address.sol";
 
 import { EIP712 } from "openzeppelin/utils/cryptography/EIP712.sol";
 import { ISignatureTransfer } from "permit2/src/interfaces/ISignatureTransfer.sol";
@@ -62,7 +63,22 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
      * Signature type not supported.
      */
     error SignatureNotSupported(bytes1);
-
+    /**
+     * @dev The provided output index is out of bounds for the order's outputs array.
+     */
+    error OutputIndexOutOfBounds(uint256 index, uint256 length);
+    /**
+     * @dev An ERC-3009 collection did not increase this contract's token balance by exactly the input amount.
+     */
+    error InvalidBalanceDelta(uint256 expectedBalance, uint256 actualBalance);
+    /**
+     * @dev The attached msg.value does not exactly match the sum of the order's native inputs.
+     */
+    error InvalidNativeValue(uint256 expected, uint256 actual);
+    /**
+     * @dev A native (token 0) input is not supported on this code path or by this settler variant.
+     */
+    error NativeTokenNotSupported();
     /**
      * @notice Emitted when an order is opened.
      * @param orderId The order identifier.
@@ -131,16 +147,19 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
 
     /**
      * @notice Opens an intent for `order.user`. `order.input` tokens are collected from msg.sender.
+     * @dev Native inputs (token 0) are collected from msg.value, which must equal the sum of the order's native
+     * input amounts exactly (msg.value must be 0 for orders without native inputs).
      * @param order StandardOrder representing the intent.
      */
     function open(
         StandardOrder calldata order
-    ) external {
+    ) external payable {
         // Validate the order structure.
         _validateInputChain(order.originChainId);
         _validateTimestampHasNotPassed(order.fillDeadline);
         _validateTimestampHasNotPassed(order.expires);
         _validateFillDeadlineBeforeExpiry(order.fillDeadline, order.expires);
+        _validateUser(order.user);
 
         bytes32 orderId = order.orderIdentifier();
 
@@ -160,22 +179,30 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
 
     /**
      * @notice Collect input tokens directly from msg.sender.
+     * @dev Validates identifiers, sums native (token 0) input amounts, and pulls ERC20 inputs. Native inputs are
+     * push-based via msg.value — the exact-equality check after collection makes msg.value the sole funding source,
+     * so the contract's pooled (and force-feedable) ETH balance is never consulted.
      * @param order StandardOrder representing the intent.
      */
     function _open(
         StandardOrder calldata order
     ) internal {
-        // Collect input tokens.
         uint256[2][] calldata inputs = order.inputs;
         uint256 numInputs = inputs.length;
+
+        uint256 nativeAmount;
         for (uint256 i = 0; i < numInputs; ++i) {
             uint256[2] calldata input = inputs[i];
-            // This contract does not use the upper 12 bits. We could clean them but follow the openFor structure for
-            // simplicity.
+            // Reverts on dirty upper bits: token 0 is the only representation of native.
             address token = input[0].validatedCleanAddress();
-            uint256 amount = input[1];
-            SafeERC20.safeTransferFrom(IERC20(token), msg.sender, address(this), amount);
+            if (token == address(0)) {
+                // Checked arithmetic: an overflowing native sum reverts.
+                nativeAmount += input[1];
+            } else {
+                SafeERC20.safeTransferFrom(IERC20(token), msg.sender, address(this), input[1]);
+            }
         }
+        if (msg.value != nativeAmount) revert InvalidNativeValue(nativeAmount, msg.value);
     }
 
     /**
@@ -190,17 +217,22 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
      * @param signature Allowance signature from sponsor with a signature type encoded as:
      * - SIGNATURE_TYPE_PERMIT2:  b1:0x00 | bytes:signature
      * - SIGNATURE_TYPE_3009:     b1:0x01 | bytes:signature OR abi.encode(bytes[]:signatures)
+     *
+     * Native inputs (token 0) are only supported on the SIGNATURE_TYPE_SELF path (msg.sender == sponsor), funded by
+     * msg.value. Native ETH cannot be pulled from a sponsor by signature: Permit2 and ERC-3009 are ERC20 mechanisms,
+     * so those paths reject native inputs and any attached msg.value.
      */
     function openFor(
         StandardOrder calldata order,
         address sponsor,
         bytes calldata signature
-    ) external {
+    ) external payable {
         // Validate the order structure.
         _validateInputChain(order.originChainId);
         _validateTimestampHasNotPassed(order.fillDeadline);
         _validateTimestampHasNotPassed(order.expires);
         _validateFillDeadlineBeforeExpiry(order.fillDeadline, order.expires);
+        _validateUser(order.user);
 
         bytes32 orderId = order.orderIdentifier();
 
@@ -211,12 +243,15 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
 
         // Check the first byte of the signature for signature type then collect inputs.
         bytes1 signatureType = signature.length > 0 ? signature[0] : SIGNATURE_TYPE_SELF;
-        if (signatureType == SIGNATURE_TYPE_PERMIT2) {
+        if (msg.sender == sponsor && signatureType == SIGNATURE_TYPE_SELF) {
+            _open(order);
+        } else if (msg.value != 0) {
+            // Only the self path is funded by msg.value; stray value on signature paths would be stranded.
+            revert InvalidNativeValue(0, msg.value);
+        } else if (signatureType == SIGNATURE_TYPE_PERMIT2) {
             _openForWithPermit2(order, sponsor, signature[1:], address(this));
         } else if (signatureType == SIGNATURE_TYPE_3009) {
             _openForWithAuthorization(order.inputs, order.fillDeadline, sponsor, signature[1:], orderId);
-        } else if (msg.sender == sponsor && signatureType == SIGNATURE_TYPE_SELF) {
-            _open(order);
         } else {
             revert SignatureNotSupported(signatureType);
         }
@@ -263,6 +298,10 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
                 // => This ensures a signed order can only have exactly 1 orderId.
                 address token = inputToken.validatedCleanAddress();
 
+                // Native ETH cannot be pulled by a Permit2 signature. This guard is load-bearing: a collection path
+                // that marks an order Deposited without receiving ETH would let its finalise drain ETH escrowed for
+                // other orders.
+                if (token == address(0)) revert NativeTokenNotSupported();
                 // Check if input tokens are contracts.
                 IsContractLib.validateContainsCode(token);
                 // Set the allowance. This is the explicit max allowed amount approved by the user.
@@ -289,6 +328,11 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
      * @notice Helper function for using ERC-3009 to collect assets represented by a StandardOrder.
      * @dev For the `receiveWithAuthorization` call, the nonce is set as the orderId to select the order associated with
      * the authorization.
+     *
+     * Every collection is strictly balance-checked: this contract's token balance must increase by exactly the input
+     * amount or the call reverts with {InvalidBalanceDelta}. This is required on the ERC-3009 path in particular
+     * because the single-input branch performs a raw `call` whose success would otherwise be trusted without any
+     * evidence that tokens moved.
      * @param inputs Order inputs to be collected.
      * @param fillDeadline Deadline for calling the open function.
      * @param signer Provider of the ERC-3009 funds and signer of the intent.
@@ -306,6 +350,8 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
         if (numInputs == 1) {
             // If there is only 1 input, try using the provided signature as is.
             uint256[2] calldata input = inputs[0];
+            // Native ETH cannot be pulled by an ERC-3009 authorization.
+            if (input[0] == 0) revert NativeTokenNotSupported();
             bytes memory callData = abi.encodeCall(
                 IERC3009.receiveWithAuthorization,
                 (signer, address(this), input[1], 0, fillDeadline, orderId, _signature_)
@@ -322,8 +368,13 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
             // })
             address token = input[0].validatedCleanAddress();
             IsContractLib.validateContainsCode(token); // Ensure called contract has code.
+            uint256 balanceBefore = IERC20(token).balanceOf(address(this));
             (bool success,) = token.call(callData);
-            if (success) return;
+            // If the call succeeded, require the exact balance increase.
+            if (success) {
+                _validateBalanceIncrease(token, balanceBefore, input[1]);
+                return;
+            }
             // Otherwise it could be because of a lot of reasons. One being the signature is abi.encoded as bytes[].
         }
         {
@@ -332,18 +383,50 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
         }
         for (uint256 i; i < numInputs; ++i) {
             uint256[2] calldata input = inputs[i];
+            // Native ETH cannot be pulled by an ERC-3009 authorization.
+            if (input[0] == 0) revert NativeTokenNotSupported();
             bytes calldata signature = BytesLib.getBytesOfArray(_signature_, i);
-            // forgefmt: disable-next-line
-            IERC3009(input[0].validatedCleanAddress()).receiveWithAuthorization({
-                from: signer,
-                to: address(this),
-                value: input[1],
-                validAfter: 0,
-                validBefore: fillDeadline,
-                nonce: orderId,
-                signature: signature
-            });
+            address token = input[0].validatedCleanAddress();
+            uint256 balanceBefore = IERC20(token).balanceOf(address(this));
+            _receiveWithAuthorization(input, fillDeadline, signer, signature, orderId);
+            _validateBalanceIncrease(token, balanceBefore, input[1]);
         }
+    }
+
+    function _receiveWithAuthorization(
+        uint256[2] calldata input,
+        uint32 fillDeadline,
+        address signer,
+        bytes calldata signature,
+        bytes32 orderId
+    ) private {
+        // forgefmt: disable-next-line
+        IERC3009(input[0].validatedCleanAddress()).receiveWithAuthorization({
+            from: signer,
+            to: address(this),
+            value: input[1],
+            validAfter: 0,
+            validBefore: fillDeadline,
+            nonce: orderId,
+            signature: signature
+        });
+    }
+
+    /**
+     * @notice Validates that this contract's balance of `token` increased by exactly `amount` over `balanceBefore`.
+     * @dev The expected balance is computed with checked arithmetic because `amount` is attacker-controlled.
+     * @param token The collected token.
+     * @param balanceBefore This contract's balance of `token` before the collection.
+     * @param amount The exact increase required.
+     */
+    function _validateBalanceIncrease(
+        address token,
+        uint256 balanceBefore,
+        uint256 amount
+    ) internal view {
+        uint256 expectedBalance = balanceBefore + amount;
+        uint256 actualBalance = IERC20(token).balanceOf(address(this));
+        if (actualBalance != expectedBalance) revert InvalidBalanceDelta(expectedBalance, actualBalance);
     }
 
     // --- Refund --- //
@@ -360,6 +443,36 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
         _validateTimestampHasPassed(order.expires);
 
         bytes32 orderId = order.orderIdentifier();
+        _resolveLock(orderId, order.inputs, order.user, OrderStatus.Refunded);
+        emit Refunded(orderId);
+    }
+
+    /**
+     * @notice Refunds an order as soon as any one of its outputs is proven not filled before the order's fill
+     * deadline — without waiting for `order.expires`. The time-based `refund` remains available as the backstop.
+     * @dev Permissionless; the inputs always go to `order.user`. Safe because:
+     * - Fills are frozen after `order.fillDeadline`, so a proven non-fill is permanent.
+     * - The proof hash is reconstructed from the signed `order.fillDeadline` (committed inside `orderId`), so
+     *   attestations for fabricated deadlines are inert.
+     * - `_resolveLock` requires `Deposited` and flips it: this and `finalise` can never both settle the same order.
+     * - A single missing output suffices since `finalise` requires every output proven filled.
+     * @param order StandardOrder description of the intent.
+     * @param outputIndex Index of the output proven not filled.
+     */
+    function refundOnNonFill(
+        StandardOrder calldata order,
+        uint256 outputIndex
+    ) external virtual {
+        _validateInputChain(order.originChainId);
+        _validateTimestampHasPassed(order.fillDeadline);
+
+        if (outputIndex >= order.outputs.length) {
+            revert OutputIndexOutOfBounds(outputIndex, order.outputs.length);
+        }
+
+        bytes32 orderId = order.orderIdentifier();
+        _validateNonFill(order.fillDeadline, order.inputOracle, order.outputs[outputIndex], orderId);
+
         _resolveLock(orderId, order.inputs, order.user, OrderStatus.Refunded);
         emit Refunded(orderId);
     }
@@ -476,16 +589,27 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
         uint256 numInputs = inputs.length;
         for (uint256 i; i < numInputs; ++i) {
             uint256[2] calldata input = inputs[i];
-            address token = input[0].validatedCleanAddress();
-            uint256 amount = input[1];
-
-            _transfer(token, destination, amount);
+            _sendInputAsset(input[0], destination, input[1]);
         }
     }
 
     /**
-     * @dev Pays out a single escrowed input. Virtual so subclasses can customise the outbound transfer for
-     * non-standard tokens (e.g. {InputSettlerEscrowTron} for TRON USDT, whose `transfer` returns `false` on success).
+     * @dev Pays out a single escrowed input, native or ERC20. A recipient rejecting a native transfer would block the
+     * path until fixed; a user cannot be refunded their inputs.
+     * @param tokenId The input token identifier; 0 is native ETH.
+     * @param destination The recipient of the asset.
+     * @param amount The amount to transfer.
+     */
+    function _sendInputAsset(uint256 tokenId, address destination, uint256 amount) internal {
+        if (tokenId == 0) {
+            if (amount > 0) Address.sendValue(payable(destination), amount);
+        } else {
+            _transfer(tokenId.validatedCleanAddress(), destination, amount);
+        }
+    }
+
+    /**
+     * @dev Pays out a single escrowed ERC20 input.
      * @param token The input token to transfer.
      * @param destination The recipient of the tokens.
      * @param amount The amount to transfer.
@@ -496,6 +620,20 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
         uint256 amount
     ) internal virtual {
         SafeERC20.safeTransfer(IERC20(token), destination, amount);
+    }
+
+    /**
+     * @inheritdoc InputSettlerPurchase
+     * @dev Native transfers have to be validated against msg.value before this function is called.
+     */
+    function _transferFromSender(uint256 tokenId, address to, uint256 amount) internal virtual override {
+        if (tokenId == 0) {
+            // The exact-value guard makes msg.value, rather than pooled escrow, the source of this payment.
+            // forge-lint: disable-next-line(arbitrary-send-eth)
+            Address.sendValue(payable(to), amount);
+        } else {
+            SafeERC20.safeTransferFrom(IERC20(tokenId.validatedCleanAddress()), msg.sender, to, amount);
+        }
     }
 
     // --- Purchase Order --- //
@@ -519,7 +657,7 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
         bytes32 purchaser,
         uint256 expiryTimestamp,
         bytes calldata solverSignature
-    ) external virtual {
+    ) external payable virtual {
         _validateInputChain(order.originChainId);
         _validateTimestampHasNotPassed(order.expires);
         bytes32 computedOrderId = order.orderIdentifier();
@@ -530,8 +668,24 @@ contract InputSettlerEscrow is InputSettlerPurchase, IInputSettlerEscrow {
         OrderStatus status = orderStatus[computedOrderId];
         if (status != OrderStatus.Deposited) revert InvalidOrderStatus();
 
+        _validatePurchaseNativeValue(order.inputs, orderPurchase.discount);
         _purchaseOrder(
             orderPurchase, order.inputs, orderSolvedByIdentifier, purchaser, expiryTimestamp, solverSignature
         );
+    }
+
+    /**
+     * @dev Requires msg.value to exactly fund every discounted native input before the purchase makes external calls.
+     */
+    function _validatePurchaseNativeValue(uint256[2][] calldata inputs, uint256 discount) internal view {
+        uint256 nativeAmount = 0;
+        uint256 numInputs = inputs.length;
+        for (uint256 i = 0; i < numInputs; ++i) {
+            uint256[2] calldata input = inputs[i];
+            if (input[0] == 0) {
+                nativeAmount += (input[1] * (DISCOUNT_DENOM - discount)) / DISCOUNT_DENOM;
+            }
+        }
+        if (msg.value != nativeAmount) revert InvalidNativeValue(nativeAmount, msg.value);
     }
 }

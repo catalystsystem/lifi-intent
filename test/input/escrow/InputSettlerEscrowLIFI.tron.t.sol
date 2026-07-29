@@ -7,9 +7,11 @@ import { InputSettlerBase } from "OIF/src/input/InputSettlerBase.sol";
 
 import { StandardOrder } from "OIF/src/input/types/StandardOrderType.sol";
 import { MandateOutput, MandateOutputEncodingLib } from "OIF/src/libs/MandateOutputEncodingLib.sol";
+import { RefEncodingLib } from "test/util/RefEncodingLib.sol";
 
 import { InputSettlerEscrowTest } from "OIF/test/input/escrow/InputSettlerEscrow.t.sol";
 
+import { MockERC20 } from "OIF/test/mocks/MockERC20.sol";
 import { MockTronUSDT } from "../../mocks/MockUSDT.tron.sol";
 
 contract InputSettlerEscrowLIFITronHarness is InputSettlerEscrowLIFITron {
@@ -23,6 +25,17 @@ contract InputSettlerEscrowLIFITronHarness is InputSettlerEscrowLIFITron {
         bytes32 orderId
     ) external view {
         _validateFillsNow(inputOracle, outputs, orderId);
+    }
+
+    /// @dev Exposes the internal `_resolveLock` payout, putting the order in `Deposited` first (the state `open`
+    /// leaves it in), so the outbound-transfer behaviour can be tested in isolation.
+    function payOut(
+        bytes32 orderId,
+        uint256[2][] calldata inputs,
+        address destination
+    ) external {
+        orderStatus[orderId] = OrderStatus.Deposited;
+        _resolveLock(orderId, inputs, destination, OrderStatus.Claimed);
     }
 }
 
@@ -41,9 +54,13 @@ contract InputSettlerEscrowLIFITronTest is InputSettlerEscrowTest {
         owner = makeAddr("owner");
         inputSettlerEscrow = address(new InputSettlerEscrowLIFITronHarness(owner));
 
-        // Replace tokens with MockTronUSDT to simulate Tron USDT behavior
-        token = new MockTronUSDT("Tron USDT", "USDT", 6);
-        anotherToken = new MockTronUSDT("Tron USDT2", "USDT2", 6);
+        // `token` is TRON USDT: deploy the false-returning mock at the settler's hardcoded USDT address so payouts
+        // exercise the SafeTRC20.safeTransferUSDT path. `anotherToken` is a well-behaved TRC20 that settles through
+        // the regular SafeTRC20.safeTransfer path.
+        address usdt = InputSettlerEscrowLIFITron(inputSettlerEscrow).USDT();
+        deployCodeTo("MockUSDT.tron.sol:MockTronUSDT", abi.encode("Tron USDT", "USDT", uint8(6)), usdt);
+        token = MockTronUSDT(usdt);
+        anotherToken = new MockERC20("Mock2 ERC20", "MOCK2", 18);
 
         token.mint(swapper, 1e18);
         anotherToken.mint(solver, 1e18);
@@ -65,7 +82,10 @@ contract InputSettlerEscrowLIFITronTest is InputSettlerEscrowTest {
         vm.assume(fee <= MAX_GOVERNANCE_FEE);
         vm.prank(owner);
         InputSettlerEscrowLIFI(inputSettlerEscrow).setGovernanceFee(fee);
-        vm.warp(uint32(block.timestamp) + GOVERNANCE_FEE_CHANGE_DELAY + 1);
+        // Warp target computed before the warp and reused everywhere; reading block.timestamp after vm.warp is
+        // unsafe under via-IR (see InputSettlerEscrowLIFI.t.sol).
+        uint32 fillTimestamp = uint32(block.timestamp + GOVERNANCE_FEE_CHANGE_DELAY + 1);
+        vm.warp(fillTimestamp);
         InputSettlerEscrowLIFI(inputSettlerEscrow).applyGovernanceFee();
 
         uint256 amount = 1e18 / 10;
@@ -102,8 +122,8 @@ contract InputSettlerEscrowLIFITronTest is InputSettlerEscrowTest {
         InputSettlerEscrowLIFI(inputSettlerEscrow).open(order);
 
         bytes32 orderId = InputSettlerEscrowLIFI(inputSettlerEscrow).orderIdentifier(order);
-        bytes memory payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
-            bytes32(uint256(uint160((solver)))), orderId, uint32(block.timestamp), outputs[0]
+        bytes memory payload = RefEncodingLib.encodeFillDescriptionMemory(
+            bytes32(uint256(uint160((solver)))), orderId, fillTimestamp, outputs[0]
         );
         bytes32 payloadHash = keccak256(payload);
 
@@ -119,7 +139,7 @@ contract InputSettlerEscrowLIFITronTest is InputSettlerEscrowTest {
 
         InputSettlerBase.SolveParams[] memory solveParams = new InputSettlerBase.SolveParams[](1);
         solveParams[0] = InputSettlerBase.SolveParams({
-            timestamp: uint32(block.timestamp), solver: bytes32(uint256(uint160((solver))))
+            timestamp: fillTimestamp, solver: bytes32(uint256(uint160((solver))))
         });
 
         vm.prank(solver);
@@ -169,7 +189,7 @@ contract InputSettlerEscrowLIFITronTest is InputSettlerEscrowTest {
         InputSettlerEscrowLIFI(inputSettlerEscrow).open(order);
 
         bytes32 orderId = InputSettlerEscrowLIFI(inputSettlerEscrow).orderIdentifier(order);
-        bytes memory payload = MandateOutputEncodingLib.encodeFillDescriptionMemory(
+        bytes memory payload = RefEncodingLib.encodeFillDescriptionMemory(
             bytes32(uint256(uint160((solver)))), orderId, uint32(block.timestamp), outputs[0]
         );
         bytes32 payloadHash = keccak256(payload);
@@ -194,5 +214,36 @@ contract InputSettlerEscrowLIFITronTest is InputSettlerEscrowTest {
             .finalise(order, solveParams, bytes32(uint256(uint160((solver)))), hex"");
 
         assertEq(token.balanceOf(solver), amount);
+    }
+
+    //--- Outbound transfer (USDT vs. regular token) ---//
+
+    function _payOutInputs(
+        address t,
+        uint256 amount
+    ) internal pure returns (uint256[2][] memory inputs) {
+        inputs = new uint256[2][](1);
+        inputs[0][0] = uint256(uint160(t));
+        inputs[0][1] = amount;
+    }
+
+    /// @dev The Tron variant pays out USDT despite its `false` return, via SafeTRC20.safeTransferUSDT.
+    function test_tronEscrow_pays_out_usdt() public {
+        uint256 amount = 1000;
+        token.mint(inputSettlerEscrow, amount);
+        uint256 balanceBefore = token.balanceOf(solver);
+        InputSettlerEscrowLIFITronHarness(inputSettlerEscrow)
+            .payOut(bytes32(uint256(1)), _payOutInputs(address(token), amount), solver);
+        assertEq(token.balanceOf(solver) - balanceBefore, amount);
+    }
+
+    /// @dev Non-USDT tokens still settle through the regular SafeTRC20.safeTransfer path.
+    function test_tronEscrow_pays_out_regular_token() public {
+        uint256 amount = 1000;
+        anotherToken.mint(inputSettlerEscrow, amount);
+        uint256 balanceBefore = anotherToken.balanceOf(solver);
+        InputSettlerEscrowLIFITronHarness(inputSettlerEscrow)
+            .payOut(bytes32(uint256(2)), _payOutInputs(address(anotherToken), amount), solver);
+        assertEq(anotherToken.balanceOf(solver) - balanceBefore, amount);
     }
 }
