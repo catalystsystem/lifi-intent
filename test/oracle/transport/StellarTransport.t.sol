@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 import { AxelarOracle } from "../../../src/integrations/oracles/axelar/AxelarOracle.sol";
+import { BoundedOracle } from "../../../src/integrations/oracles/common/BoundedOracle.sol";
 import { OracleAddress } from "../../../src/integrations/oracles/common/OracleAddress.sol";
 import { LayerZeroOracle, Origin } from "../../../src/integrations/oracles/layerzero/LayerZeroOracle.sol";
 import { MessageEncodingLib } from "../../../src/libs/MessageEncodingLib.sol";
@@ -86,7 +87,9 @@ contract StellarTransportTest is Test {
         );
     }
 
-    function testFuzzSolanaAddressRoundtrip(bytes32 id) public {
+    function testFuzzSolanaAddressRoundtrip(
+        bytes32 id
+    ) public {
         assertEq(this.decodeAddress(OracleAddress.encode(id, OracleAddress.Kind.Solana), OracleAddress.Kind.Solana), id);
     }
 
@@ -101,13 +104,22 @@ contract StellarTransportTest is Test {
         oracle.submit("solana", SENDER, address(source), p, config, AxelarOracle.DeliveryMode.SelfRelay);
         assertEq(gateway.paid(), 0);
         assertEq(gateway.lastSender(), address(oracle));
-        assertEq(gateway.lastMessage(), bytes.concat(hex"0064010000", this.encode(bytes32(uint256(uint160(address(source)))), p), hex"01000000", config, hex"00"));
+        assertEq(
+            gateway.lastMessage(),
+            bytes.concat(
+                hex"0064010000",
+                this.encode(bytes32(uint256(uint160(address(source)))), p),
+                hex"01000000",
+                config,
+                hex"00"
+            )
+        );
         assertEq(gateway.lastDestination(), OracleAddress.encode(SENDER, OracleAddress.Kind.Solana));
         vm.expectRevert();
-        oracle.submit{value: 1}("solana", SENDER, address(source), p, config, AxelarOracle.DeliveryMode.SelfRelay);
+        oracle.submit{ value: 1 }("solana", SENDER, address(source), p, config, AxelarOracle.DeliveryMode.SelfRelay);
         vm.expectRevert();
         oracle.submit("solana", SENDER, address(source), p, config, AxelarOracle.DeliveryMode.Relayed);
-        oracle.submit{value: 10}("solana", SENDER, address(source), p, config, AxelarOracle.DeliveryMode.Relayed);
+        oracle.submit{ value: 10 }("solana", SENDER, address(source), p, config, AxelarOracle.DeliveryMode.Relayed);
         assertEq(gateway.paid(), 10);
         vm.expectRevert();
         oracle.submit("solana", SENDER, address(source), p, bytes32(0), AxelarOracle.DeliveryMode.SelfRelay);
@@ -132,7 +144,9 @@ contract StellarTransportTest is Test {
 
     function testAxelarExportAndAuthenticatedNamespace() public {
         source.setOracle(address(axelar));
-        axelar.submit{ value: 10 }("stellar", SENDER, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed);
+        axelar.submit{ value: 10 }(
+            "stellar", SENDER, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed
+        );
         assertEq(gateway.lastSender(), address(axelar));
         assertEq(gateway.lastRefund(), address(this));
         assertEq(gateway.lastDestination(), OracleAddress.encode(SENDER, OracleAddress.Kind.Stellar));
@@ -178,16 +192,33 @@ contract StellarTransportTest is Test {
         vm.expectRevert();
         this.decode(m);
         vm.expectRevert();
-        axelar.submit{ value: 10 }("stellar", SENDER, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed);
+        axelar.submit{ value: 10 }(
+            "stellar", SENDER, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed
+        );
         source.setOracle(address(axelar));
         bytes[] memory big = new bytes[](1);
         big[0] = new bytes(685);
         vm.expectRevert();
-        axelar.submit{ value: 10 }("stellar", SENDER, address(source), big, bytes32(0), AxelarOracle.DeliveryMode.Relayed);
+        axelar.submit{ value: 10 }(
+            "stellar", SENDER, address(source), big, bytes32(0), AxelarOracle.DeliveryMode.Relayed
+        );
         vm.expectRevert();
         lz.quote(30600, SENDER, address(source), payloads(), hex"");
         vm.expectRevert();
         lz.quote(999, SENDER, address(source), payloads(), options());
+    }
+
+    function testLayerZeroRejectsNilConfirmations() public {
+        address[] memory dvns = new address[](1);
+        dvns[0] = address(0x1234);
+        LayerZeroOracle.Chain[] memory c = new LayerZeroOracle.Chain[](1);
+        c[0] = LayerZeroOracle.Chain(30600, CHAIN, address(1), address(2), address(3), type(uint64).max, 1, dvns, dvns);
+        vm.expectRevert(BoundedOracle.InvalidConfiguration.selector);
+        new LayerZeroOracle(address(endpoint), c);
+        c[0].sendConfirmations = 1;
+        c[0].receiveConfirmations = type(uint64).max;
+        vm.expectRevert(BoundedOracle.InvalidConfiguration.selector);
+        new LayerZeroOracle(address(endpoint), c);
     }
 
     function testMaximumBatchAndTupleChecks() public {

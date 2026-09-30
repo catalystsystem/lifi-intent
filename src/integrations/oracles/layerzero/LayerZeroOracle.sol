@@ -125,7 +125,10 @@ contract LayerZeroOracle is BoundedOracle {
         uint64 confirmations,
         address[] memory dvns
     ) private pure returns (bytes memory) {
-        if (confirmations == 0 || dvns.length == 0 || dvns.length > 127) revert InvalidConfiguration();
+        // UlnBase reads type(uint64).max (NIL_CONFIRMATIONS) in an OApp config as literal zero confirmations.
+        if (confirmations == 0 || confirmations == type(uint64).max || dvns.length == 0 || dvns.length > 127) {
+            revert InvalidConfiguration();
+        }
         address previous;
         for (uint256 i; i < dvns.length; ++i) {
             if (dvns[i] <= previous) revert InvalidConfiguration();
