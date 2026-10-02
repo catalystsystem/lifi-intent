@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 import { AxelarOracle } from "../../../src/integrations/oracles/axelar/AxelarOracle.sol";
 import { BoundedOracle } from "../../../src/integrations/oracles/common/BoundedOracle.sol";
+import { Ownable } from "openzeppelin/access/Ownable.sol";
 import { OracleAddress } from "../../../src/integrations/oracles/common/OracleAddress.sol";
 import { LayerZeroOracle, Origin } from "../../../src/integrations/oracles/layerzero/LayerZeroOracle.sol";
 import { MessageEncodingLib } from "../../../src/libs/MessageEncodingLib.sol";
@@ -38,9 +39,8 @@ contract StellarTransportTest is Test {
         gateway = new GatewayFixture();
         endpoint = new EndpointFixture();
         source = new BoundAttester();
-        AxelarOracle.Chain[] memory a = new AxelarOracle.Chain[](1);
-        a[0] = AxelarOracle.Chain("stellar", CHAIN, OracleAddress.Kind.Stellar);
-        axelar = new AxelarOracle(address(gateway), address(gateway), a);
+        axelar = new AxelarOracle(address(this), address(gateway), address(gateway));
+        axelar.setChainMap("stellar", CHAIN, OracleAddress.Kind.Stellar);
         LayerZeroOracle.Chain[] memory c = new LayerZeroOracle.Chain[](1);
         address[] memory dvns = new address[](1);
         dvns[0] = address(0x1234);
@@ -129,9 +129,8 @@ contract StellarTransportTest is Test {
     }
 
     function testSolanaEnvelopeAndExplicitSelfRelay() public {
-        AxelarOracle.Chain[] memory routes = new AxelarOracle.Chain[](1);
-        routes[0] = AxelarOracle.Chain("solana", 9, OracleAddress.Kind.Solana);
-        AxelarOracle oracle = new AxelarOracle(address(gateway), address(gateway), routes);
+        AxelarOracle oracle = new AxelarOracle(address(this), address(gateway), address(gateway));
+        oracle.setChainMap("solana", 9, OracleAddress.Kind.Solana);
         source.setOracle(address(oracle));
         bytes[] memory p = new bytes[](1);
         p[0] = new bytes(320);
@@ -197,6 +196,48 @@ contract StellarTransportTest is Test {
         axelar.execute(bytes32(0), "stellar", sender, m);
         gateway.approve(bytes32(uint256(1)), "stellar", sender, address(axelar), m);
         axelar.execute(bytes32(uint256(1)), "stellar", sender, m);
+    }
+
+    function testAxelarChainMapOwnerSetOnce() public {
+        vm.prank(address(0xBEEF));
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xBEEF)));
+        axelar.setChainMap("evm", 1, OracleAddress.Kind.Evm);
+        vm.expectRevert(AxelarOracle.ZeroValue.selector);
+        axelar.setChainMap("evm", 0, OracleAddress.Kind.Evm);
+        vm.expectRevert(AxelarOracle.AlreadySet.selector);
+        axelar.setChainMap("stellar", 2, OracleAddress.Kind.Evm);
+        vm.expectRevert(AxelarOracle.AlreadySet.selector);
+        axelar.setChainMap("evm", CHAIN, OracleAddress.Kind.Evm);
+        string[4] memory bad = ["Evm", "", "abcdefghijklmnopqrstu", "e_vm"];
+        for (uint256 i; i < bad.length; ++i) {
+            vm.expectRevert(BoundedOracle.InvalidConfiguration.selector);
+            axelar.setChainMap(bad[i], 2, OracleAddress.Kind.Evm);
+        }
+        vm.expectEmit(address(axelar));
+        emit AxelarOracle.ChainMapConfigured("evm", 1, OracleAddress.Kind.Evm);
+        axelar.setChainMap("evm", 1, OracleAddress.Kind.Evm);
+        assertEq(axelar.reverseChainIdMap(1), keccak256("evm"));
+        for (uint256 i; i < 17; ++i) {
+            axelar.setChainMap(string.concat("c", vm.toString(i)), 1000 + i, OracleAddress.Kind.Evm);
+        }
+        assertEq(axelar.route("C16").chainId, 1016);
+        vm.expectRevert(BoundedOracle.UnknownChain.selector);
+        axelar.route("stellar ");
+        axelar.renounceOwnership();
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(this)));
+        axelar.setChainMap("late", 5, OracleAddress.Kind.Evm);
+    }
+
+    function testAxelarLowercaseLookupForwardsCanonicalName() public {
+        source.setOracle(address(axelar));
+        axelar.submit{ value: 10 }("STELLAR", SENDER, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed);
+        assertEq(gateway.lastChain(), "stellar");
+        assertEq(gateway.lastGasChain(), "stellar");
+        bytes memory m = this.encode(APP, payloads());
+        string memory sender = OracleAddress.encode(SENDER, OracleAddress.Kind.Stellar);
+        gateway.approve(bytes32(uint256(7)), "Stellar", sender, address(axelar), m);
+        axelar.execute(bytes32(uint256(7)), "Stellar", sender, m);
+        assertTrue(axelar.isProven(CHAIN, SENDER, APP, keccak256(payloads()[0])));
     }
 
     function testLayerZeroExportReceiveReplayAndFees() public {
