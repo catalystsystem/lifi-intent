@@ -2,34 +2,16 @@
 pragma solidity ^0.8.26;
 import { AxelarOracle } from "../../../src/integrations/oracles/axelar/AxelarOracle.sol";
 import { BoundedOracle } from "../../../src/integrations/oracles/common/BoundedOracle.sol";
-import { Ownable } from "openzeppelin/access/Ownable.sol";
 import { OracleAddress } from "../../../src/integrations/oracles/common/OracleAddress.sol";
-import { LayerZeroOracle, Origin } from "../../../src/integrations/oracles/layerzero/LayerZeroOracle.sol";
 import { MessageEncodingLib } from "../../../src/libs/MessageEncodingLib.sol";
-import { EndpointFixture, GatewayFixture } from "./TransportFixtures.sol";
+import { BoundAttester } from "./BoundAttester.sol";
+import { GatewayFixture } from "./GatewayFixture.sol";
 import { Test } from "forge-std/Test.sol";
+import { Ownable } from "openzeppelin/access/Ownable.sol";
 
-contract BoundAttester {
-    address public oracle;
-
-    function setOracle(
-        address o
-    ) external {
-        oracle = o;
-    }
-
-    function hasAttested(
-        bytes[] calldata
-    ) external view returns (bool) {
-        return msg.sender == oracle;
-    }
-}
-
-contract StellarTransportTest is Test {
+contract AxelarOracleTest is Test {
     GatewayFixture gateway;
-    EndpointFixture endpoint;
     AxelarOracle axelar;
-    LayerZeroOracle lz;
     BoundAttester source;
     bytes32 constant SENDER = keccak256("stellar oracle");
     bytes32 constant APP = keccak256("stellar settler");
@@ -37,16 +19,11 @@ contract StellarTransportTest is Test {
 
     function setUp() public {
         gateway = new GatewayFixture();
-        endpoint = new EndpointFixture();
         source = new BoundAttester();
         axelar = new AxelarOracle(address(this), address(gateway), address(gateway));
         axelar.setChainMap("stellar", CHAIN, OracleAddress.Kind.Stellar);
-        LayerZeroOracle.Chain[] memory c = new LayerZeroOracle.Chain[](1);
-        address[] memory dvns = new address[](1);
-        dvns[0] = address(0x1234);
-        c[0] = LayerZeroOracle.Chain(30600, CHAIN, address(1), address(2), address(3), 1, 1, dvns, dvns);
-        lz = new LayerZeroOracle(address(endpoint), c);
     }
+
     receive() external payable { }
 
     function payloads() internal pure returns (bytes[] memory p) {
@@ -60,72 +37,6 @@ contract StellarTransportTest is Test {
         bytes[] calldata p
     ) external pure returns (bytes memory) {
         return MessageEncodingLib.encodeMessage(application, p);
-    }
-
-    function decodeAddress(
-        string calldata value,
-        OracleAddress.Kind kind
-    ) external pure returns (bytes32) {
-        return OracleAddress.decode(value, kind);
-    }
-
-    function decode(
-        bytes calldata b
-    ) external pure returns (bytes32, bytes32[] memory) {
-        return MessageEncodingLib.getHashesOfEncodedPayloads(b);
-    }
-
-    function options() internal pure returns (bytes memory) {
-        return abi.encodePacked(hex"000301001101", uint128(200_000));
-    }
-
-    function testFuzzStellarAddressRoundtrip(
-        bytes32 id
-    ) public {
-        assertEq(
-            this.decodeAddress(OracleAddress.encode(id, OracleAddress.Kind.Stellar), OracleAddress.Kind.Stellar), id
-        );
-    }
-
-    function testFuzzSolanaAddressRoundtrip(
-        bytes32 id
-    ) public {
-        assertEq(this.decodeAddress(OracleAddress.encode(id, OracleAddress.Kind.Solana), OracleAddress.Kind.Solana), id);
-    }
-
-    // Vectors generated with @solana/web3.js PublicKey.toBase58().
-    function testSolanaAddressVectors() public {
-        bytes32[6] memory ids = [
-            bytes32(0),
-            bytes32(uint256(1)),
-            bytes32(0x00ababababababababababababababababababababababababababababababab),
-            bytes32(type(uint256).max),
-            bytes32(hex"0306466fe5211732ffecadba72c39be7bc8ce5bbc5f7126b2c439b3a40000000"),
-            bytes32(hex"037d46d67c93fbbe12f9428f838d40ff0570744927f48a64fcca704480000000")
-        ];
-        string[6] memory strings = [
-            "11111111111111111111111111111111",
-            "11111111111111111111111111111112",
-            "13cpvoZKJ28f1CDBboEmfEXMVVMcSQzBhTEMtecGWQ6v",
-            "JEKNVnkbo3jma5nREBBJCDoXFVeKkD56V3xKrvRmWxFG",
-            "ComputeBudget111111111111111111111111111111",
-            "Ed25519SigVerify111111111111111111111111111"
-        ];
-        for (uint256 i; i < ids.length; ++i) {
-            assertEq(OracleAddress.encode(ids[i], OracleAddress.Kind.Solana), strings[i]);
-            assertEq(this.decodeAddress(strings[i], OracleAddress.Kind.Solana), ids[i]);
-        }
-        // 31 decoded bytes, 33 decoded bytes, a character outside the alphabet, and 45 characters.
-        string[4] memory bad = [
-            "4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofL",
-            "111111111111111111111111111111111",
-            "0EKNVnkbo3jma5nREBBJCDoXFVeKkD56V3xKrvRmWxFG",
-            "1JEKNVnkbo3jma5nREBBJCDoXFVeKkD56V3xKrvRmWxFG"
-        ];
-        for (uint256 i; i < bad.length; ++i) {
-            vm.expectRevert();
-            this.decodeAddress(bad[i], OracleAddress.Kind.Solana);
-        }
     }
 
     function testSolanaEnvelopeAndExplicitSelfRelay() public {
@@ -160,20 +71,6 @@ contract StellarTransportTest is Test {
         p[0] = new bytes(321);
         vm.expectRevert();
         oracle.submit("solana", SENDER, address(source), p, config, AxelarOracle.DeliveryMode.SelfRelay);
-        vm.expectRevert();
-        this.decodeAddress("111111111111111111111111111111111", OracleAddress.Kind.Solana);
-        vm.expectRevert();
-        this.decodeAddress("01111111111111111111111111111111", OracleAddress.Kind.Solana);
-    }
-
-    function testPublishedStrKeyAndBadChecksum() public {
-        string memory zero = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
-        assertEq(OracleAddress.encode(bytes32(0), OracleAddress.Kind.Stellar), zero);
-        assertEq(this.decodeAddress(zero, OracleAddress.Kind.Stellar), bytes32(0));
-        vm.expectRevert();
-        this.decodeAddress("CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC5", OracleAddress.Kind.Stellar);
-        vm.expectRevert();
-        this.decodeAddress("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", OracleAddress.Kind.Stellar);
     }
 
     function testAxelarExportAndAuthenticatedNamespace() public {
@@ -230,7 +127,9 @@ contract StellarTransportTest is Test {
 
     function testAxelarLowercaseLookupForwardsCanonicalName() public {
         source.setOracle(address(axelar));
-        axelar.submit{ value: 10 }("STELLAR", SENDER, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed);
+        axelar.submit{ value: 10 }(
+            "STELLAR", SENDER, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed
+        );
         assertEq(gateway.lastChain(), "stellar");
         assertEq(gateway.lastGasChain(), "stellar");
         bytes memory m = this.encode(APP, payloads());
@@ -238,23 +137,6 @@ contract StellarTransportTest is Test {
         gateway.approve(bytes32(uint256(7)), "Stellar", sender, address(axelar), m);
         axelar.execute(bytes32(uint256(7)), "Stellar", sender, m);
         assertTrue(axelar.isProven(CHAIN, SENDER, APP, keccak256(payloads()[0])));
-    }
-
-    function testLayerZeroExportReceiveReplayAndFees() public {
-        source.setOracle(address(lz));
-        uint256 beforeBalance = address(this).balance;
-        lz.submit{ value: 20 }(30600, SENDER, address(source), payloads(), options());
-        assertEq(address(this).balance, beforeBalance - 10);
-        assertEq(endpoint.lastRecipient(), SENDER);
-        bytes memory m = this.encode(APP, payloads());
-        Origin memory o = Origin(30600, SENDER, 1);
-        vm.expectRevert();
-        lz.lzReceive(o, bytes32(0), m, address(this), "");
-        endpoint.approve(address(lz), o, bytes32(0), m);
-        endpoint.deliver(address(lz), o, bytes32(0), m);
-        assertTrue(lz.isProven(CHAIN, SENDER, APP, keccak256(payloads()[1])));
-        vm.expectRevert();
-        endpoint.deliver(address(lz), o, bytes32(0), m);
     }
 
     function testBoundsMalformedRollbackAndExportNamespace() public {
@@ -266,8 +148,6 @@ contract StellarTransportTest is Test {
         axelar.execute(bytes32(0), "stellar", sender, m);
         assertTrue(gateway.approvals(key));
         vm.expectRevert();
-        this.decode(m);
-        vm.expectRevert();
         axelar.submit{ value: 10 }(
             "stellar", SENDER, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed
         );
@@ -278,43 +158,5 @@ contract StellarTransportTest is Test {
         axelar.submit{ value: 10 }(
             "stellar", SENDER, address(source), big, bytes32(0), AxelarOracle.DeliveryMode.Relayed
         );
-        vm.expectRevert();
-        lz.quote(30600, SENDER, address(source), payloads(), hex"");
-        vm.expectRevert();
-        lz.quote(999, SENDER, address(source), payloads(), options());
-    }
-
-    function testLayerZeroRejectsNilConfirmations() public {
-        address[] memory dvns = new address[](1);
-        dvns[0] = address(0x1234);
-        LayerZeroOracle.Chain[] memory c = new LayerZeroOracle.Chain[](1);
-        c[0] = LayerZeroOracle.Chain(30600, CHAIN, address(1), address(2), address(3), type(uint64).max, 1, dvns, dvns);
-        vm.expectRevert(BoundedOracle.InvalidConfiguration.selector);
-        new LayerZeroOracle(address(endpoint), c);
-        c[0].sendConfirmations = 1;
-        c[0].receiveConfirmations = type(uint64).max;
-        vm.expectRevert(BoundedOracle.InvalidConfiguration.selector);
-        new LayerZeroOracle(address(endpoint), c);
-    }
-
-    function testMaximumBatchAndTupleChecks() public {
-        bytes[] memory p = new bytes[](4);
-        for (uint256 i; i < 4; ++i) {
-            p[i] = new bytes(684);
-            p[i][0] = bytes1(uint8(i));
-        }
-        bytes memory m = this.encode(APP, p);
-        assertEq(m.length, 2778);
-        Origin memory o = Origin(30600, SENDER, 1);
-        endpoint.approve(address(lz), o, bytes32(0), m);
-        endpoint.deliver(address(lz), o, bytes32(0), m);
-        bytes memory proofs;
-        for (uint256 i; i < 4; ++i) {
-            proofs = bytes.concat(proofs, abi.encodePacked(CHAIN, SENDER, APP, keccak256(p[i])));
-        }
-        lz.efficientRequireProven(proofs);
-        lz.efficientRequireProven("");
-        vm.expectRevert();
-        lz.efficientRequireProven(bytes.concat(proofs, hex"00"));
     }
 }
