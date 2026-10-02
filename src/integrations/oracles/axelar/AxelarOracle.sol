@@ -109,9 +109,9 @@ contract AxelarOracle is BoundedOracle {
         gateway.callContract(destinationChain, recipient, message);
     }
 
-    /// Decode a canonical Solana base58 address once (~0.7M gas) and memoize it, so every later
-    /// `execute` from that sender reads one slot instead of decoding. Anyone may pay for this:
-    /// the entry is exactly what `OracleAddress.decode` returns, so caching never changes results.
+    /// Decode a canonical Solana base58 address and memoize it before any message arrives, so even
+    /// the first `execute` from that sender skips the decode. Anyone may pay for this: the entry is
+    /// exactly what `OracleAddress.decode` returns, so caching never changes results.
     function cacheSolanaAddress(
         string calldata value
     ) external returns (bytes32 id) {
@@ -121,6 +121,7 @@ contract AxelarOracle is BoundedOracle {
     }
 
     /// Anyone may execute, but only the gateway can approve the exact destination-bound message.
+    /// A Solana sender missing from the memo is decoded once and memoized after validation.
     function execute(
         bytes32 commandId,
         string calldata sourceChain,
@@ -128,21 +129,24 @@ contract AxelarOracle is BoundedOracle {
         bytes calldata payload
     ) external {
         Route memory r = route(sourceChain);
-        bytes32 sender = r.kind == OracleAddress.Kind.Solana
-            ? _solanaSender(sourceAddress)
-            : OracleAddress.decode(sourceAddress, r.kind);
+        bytes32 sender;
+        bytes32 cacheKey;
+        if (r.kind == OracleAddress.Kind.Solana) {
+            cacheKey = keccak256(bytes(sourceAddress));
+            sender = solanaAddresses[cacheKey];
+            if (sender != 0) cacheKey = 0;
+            else sender = OracleAddress.decode(sourceAddress, r.kind);
+        } else {
+            sender = OracleAddress.decode(sourceAddress, r.kind);
+        }
         if (!gateway.validateContractCall(commandId, sourceChain, sourceAddress, keccak256(payload))) {
             revert NotApproved();
         }
+        // The all-zero ID is indistinguishable from absent, so it is never memoized.
+        if (cacheKey != 0 && sender != 0) {
+            solanaAddresses[cacheKey] = sender;
+            emit SolanaAddressCached(sender, sourceAddress);
+        }
         _record(r.chainId, sender, payload);
-    }
-
-    /// Cached decoding when present; the all-zero ID is never distinguishable from absent, so it
-    /// always takes the full decode.
-    function _solanaSender(
-        string calldata value
-    ) private view returns (bytes32 id) {
-        id = solanaAddresses[keccak256(bytes(value))];
-        if (id == 0) id = OracleAddress.decode(value, OracleAddress.Kind.Solana);
     }
 }

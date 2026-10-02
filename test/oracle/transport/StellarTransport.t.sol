@@ -164,36 +164,63 @@ contract StellarTransportTest is Test {
         axelar.execute(bytes32(uint256(1)), "stellar", sender, m);
     }
 
-    function testSolanaSenderCacheIsPermissionlessAndCheapensExecute() public {
+    function solanaOracle() internal returns (AxelarOracle) {
         AxelarOracle.Chain[] memory routes = new AxelarOracle.Chain[](1);
         routes[0] = AxelarOracle.Chain("solana", 9, OracleAddress.Kind.Solana);
-        AxelarOracle oracle = new AxelarOracle(address(gateway), address(gateway), routes);
+        return new AxelarOracle(address(gateway), address(gateway), routes);
+    }
+
+    /// Approve and execute one fresh Solana message with cold oracle and gateway storage.
+    /// Returns call-frame gas under the fixture gateway; excludes intrinsic gas.
+    function executeCold(
+        AxelarOracle oracle,
+        uint256 commandId,
+        string memory sender,
+        bytes memory payload
+    ) internal returns (uint256 used) {
+        bytes[] memory p = new bytes[](1);
+        p[0] = payload;
+        bytes memory m = this.encode(APP, p);
+        gateway.approve(bytes32(commandId), "solana", sender, address(oracle), m);
+        vm.cool(address(oracle));
+        vm.cool(address(gateway));
+        uint256 g = gasleft();
+        oracle.execute(bytes32(commandId), "solana", sender, m);
+        used = g - gasleft();
+        assertTrue(oracle.isProven(9, SENDER, APP, keccak256(payload)));
+    }
+
+    function testSolanaSenderMemoizedByFirstApprovedExecute() public {
+        AxelarOracle oracle = solanaOracle();
+        string memory sender = OracleAddress.encode(SENDER, OracleAddress.Kind.Solana);
+        bytes32 key = keccak256(bytes(sender));
+
+        // A rejected approval rolls back the memo write.
         bytes[] memory p = new bytes[](1);
         p[0] = hex"d1252dff012345";
         bytes memory m = this.encode(APP, p);
+        vm.expectRevert(AxelarOracle.NotApproved.selector);
+        oracle.execute(bytes32(uint256(9)), "solana", sender, m);
+        assertEq(oracle.solanaAddresses(key), bytes32(0));
+
+        uint256 first = executeCold(oracle, 0, sender, hex"d1252dff012345");
+        assertEq(oracle.solanaAddresses(key), SENDER);
+        uint256 second = executeCold(oracle, 1, sender, hex"830c1e1c987654");
+        assertLt(second * 5, first);
+    }
+
+    function testSolanaSenderPrecacheIsPermissionless() public {
         string memory sender = OracleAddress.encode(SENDER, OracleAddress.Kind.Solana);
+        uint256 uncached = executeCold(solanaOracle(), 0, sender, hex"d1252dff012345");
 
-        gateway.approve(bytes32(0), "solana", sender, address(oracle), m);
-        uint256 g = gasleft();
-        oracle.execute(bytes32(0), "solana", sender, m);
-        uint256 uncached = g - gasleft();
-
+        AxelarOracle oracle = solanaOracle();
         // Non-canonical spellings are rejected, so they can never be cached.
         vm.expectRevert(OracleAddress.InvalidOracleAddress.selector);
         oracle.cacheSolanaAddress(string.concat("1", sender));
         vm.prank(address(0xBEEF));
         assertEq(oracle.cacheSolanaAddress(sender), SENDER);
-        assertEq(oracle.solanaAddresses(keccak256(bytes(sender))), SENDER);
-
-        // A fresh proof, so both measured calls write a new tuple.
-        p[0] = hex"830c1e1c987654";
-        m = this.encode(APP, p);
-        gateway.approve(bytes32(uint256(1)), "solana", sender, address(oracle), m);
-        g = gasleft();
-        oracle.execute(bytes32(uint256(1)), "solana", sender, m);
-        uint256 cached = g - gasleft();
-        assertTrue(oracle.isProven(9, SENDER, APP, keccak256(p[0])));
-        assertLt(cached * 5, uncached);
+        uint256 precached = executeCold(oracle, 1, sender, hex"d1252dff012345");
+        assertLt(precached * 5, uncached);
     }
 
     function testLayerZeroExportReceiveReplayAndFees() public {
