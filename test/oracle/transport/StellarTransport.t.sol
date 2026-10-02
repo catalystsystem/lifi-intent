@@ -164,6 +164,38 @@ contract StellarTransportTest is Test {
         axelar.execute(bytes32(uint256(1)), "stellar", sender, m);
     }
 
+    function testSolanaSenderCacheIsPermissionlessAndCheapensExecute() public {
+        AxelarOracle.Chain[] memory routes = new AxelarOracle.Chain[](1);
+        routes[0] = AxelarOracle.Chain("solana", 9, OracleAddress.Kind.Solana);
+        AxelarOracle oracle = new AxelarOracle(address(gateway), address(gateway), routes);
+        bytes[] memory p = new bytes[](1);
+        p[0] = hex"d1252dff012345";
+        bytes memory m = this.encode(APP, p);
+        string memory sender = OracleAddress.encode(SENDER, OracleAddress.Kind.Solana);
+
+        gateway.approve(bytes32(0), "solana", sender, address(oracle), m);
+        uint256 g = gasleft();
+        oracle.execute(bytes32(0), "solana", sender, m);
+        uint256 uncached = g - gasleft();
+
+        // Non-canonical spellings are rejected, so they can never be cached.
+        vm.expectRevert(OracleAddress.InvalidOracleAddress.selector);
+        oracle.cacheSolanaAddress(string.concat("1", sender));
+        vm.prank(address(0xBEEF));
+        assertEq(oracle.cacheSolanaAddress(sender), SENDER);
+        assertEq(oracle.solanaAddresses(keccak256(bytes(sender))), SENDER);
+
+        // A fresh proof, so both measured calls write a new tuple.
+        p[0] = hex"830c1e1c987654";
+        m = this.encode(APP, p);
+        gateway.approve(bytes32(uint256(1)), "solana", sender, address(oracle), m);
+        g = gasleft();
+        oracle.execute(bytes32(uint256(1)), "solana", sender, m);
+        uint256 cached = g - gasleft();
+        assertTrue(oracle.isProven(9, SENDER, APP, keccak256(p[0])));
+        assertLt(cached * 5, uncached);
+    }
+
     function testLayerZeroExportReceiveReplayAndFees() public {
         source.setOracle(address(lz));
         uint256 beforeBalance = address(this).balance;
