@@ -15,6 +15,8 @@ contract GatewayFixture {
     mapping(bytes32 => bool) public approvals;
     bytes public lastMessage;
     string public lastDestination;
+    string public lastChain;
+    string public lastGasChain;
     address public lastSender;
     address public lastRefund;
     uint256 public paid;
@@ -42,23 +44,25 @@ contract GatewayFixture {
     }
 
     function callContract(
-        string calldata,
+        string calldata chain,
         string calldata destination,
         bytes calldata payload
     ) external {
         lastMessage = payload;
+        lastChain = chain;
         lastDestination = destination;
         lastSender = msg.sender;
     }
 
     function payNativeGasForContractCall(
         address,
-        string calldata,
+        string calldata chain,
         string calldata,
         bytes calldata,
         address refund
     ) external payable {
         paid += msg.value;
+        lastGasChain = chain;
         lastRefund = refund;
     }
 }
