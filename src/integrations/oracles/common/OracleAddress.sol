@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-/// Axelar native strings <-> OIF raw identifiers. Stellar CRC16-XModem is stored little-endian.
+import { Base58 } from "@openzeppelin/contracts/utils/Base58.sol";
+
+/// Axelar native strings <-> OIF raw identifiers. Solana uses OpenZeppelin Base58; Stellar
+/// CRC16-XModem is stored little-endian.
 library OracleAddress {
     enum Kind {
         Evm,
@@ -11,27 +14,12 @@ library OracleAddress {
     error InvalidOracleAddress();
     bytes internal constant BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
     bytes internal constant HEX = "0123456789abcdef";
-    bytes internal constant BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
     function encode(
         bytes32 id,
         Kind kind
     ) internal pure returns (string memory) {
-        if (kind == Kind.Solana) {
-            uint256 n = uint256(id);
-            bytes memory digits = new bytes(44);
-            uint256 length;
-            while (n != 0) {
-                digits[length++] = BASE58[n % 58];
-                n /= 58;
-            }
-            uint256 zeros;
-            while (zeros < 32 && id[zeros] == 0) ++zeros;
-            bytes memory out58 = new bytes(zeros + length);
-            for (uint256 i; i < zeros; ++i) out58[i] = "1";
-            for (uint256 i; i < length; ++i) out58[zeros + i] = digits[length - 1 - i];
-            return string(out58);
-        }
+        if (kind == Kind.Solana) return Base58.encode(abi.encodePacked(id));
         if (kind == Kind.Evm) {
             if (uint256(id) >> 160 != 0) revert InvalidOracleAddress();
             bytes memory evm = new bytes(42);
@@ -70,15 +58,13 @@ library OracleAddress {
         bytes calldata input = bytes(value);
         if (kind == Kind.Solana) {
             if (input.length < 32 || input.length > 44) revert InvalidOracleAddress();
-            uint256 n;
-            for (uint256 i; i < input.length; ++i) {
-                uint256 digit;
-                while (digit < 58 && BASE58[digit] != input[i]) ++digit;
-                if (digit == 58 || n > (type(uint256).max - digit) / 58) revert InvalidOracleAddress();
-                n = n * 58 + digit;
-            }
-            id = bytes32(n);
-            if (keccak256(bytes(encode(id, kind))) != keccak256(input)) revert InvalidOracleAddress();
+            // Invalid characters revert with OpenZeppelin's `InvalidBase58Char`.
+            bytes memory decoded = Base58.decode(value);
+            if (decoded.length != 32) revert InvalidOracleAddress();
+            id = bytes32(decoded);
+            // Base58 is a bijection, so this never fails today; it pins one spelling per ID
+            // independently of the library's decoder.
+            if (keccak256(bytes(Base58.encode(decoded))) != keccak256(input)) revert InvalidOracleAddress();
             return id;
         }
         if (kind == Kind.Evm) {

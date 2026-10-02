@@ -31,11 +31,7 @@ interface IAxelarNativeGasService {
 
 /// Transparent, immutable Axelar GMP oracle. Based on OIF PR #137; supports Stellar sender identities.
 contract AxelarOracle is BoundedOracle {
-    enum DeliveryMode {
-        Relayed,
-        SelfRelay
-    }
-
+    enum DeliveryMode { Relayed, SelfRelay }
     struct Chain {
         string name;
         uint256 chainId;
@@ -49,11 +45,8 @@ contract AxelarOracle is BoundedOracle {
     IAxelarMessageGateway public immutable gateway;
     IAxelarNativeGasService public immutable gasService;
     mapping(bytes32 => Route) private routes;
-    /// Permissionless memo of canonical Solana base58 decodings: keccak256(address string) => raw ID.
-    mapping(bytes32 => bytes32) public solanaAddresses;
     error NotApproved();
     error InvalidFee();
-    event SolanaAddressCached(bytes32 indexed id, string value);
 
     constructor(
         address gateway_,
@@ -96,32 +89,19 @@ contract AxelarOracle is BoundedOracle {
         Route memory r = route(destinationChain);
         string memory recipient = OracleAddress.encode(recipientOracle, r.kind);
         bytes memory message = _export(source, payloads);
-        if (r.kind == OracleAddress.Kind.Solana) message = SolanaEnvelope.encode(message, destinationConfig);
-        else if (destinationConfig != 0) revert InvalidConfiguration();
+        if (r.kind == OracleAddress.Kind.Solana) {
+            message = SolanaEnvelope.encode(message, destinationConfig);
+        } else if (destinationConfig != 0) revert InvalidConfiguration();
         if (deliveryMode == DeliveryMode.Relayed) {
             if (msg.value == 0) revert InvalidFee();
             gasService.payNativeGasForContractCall{ value: msg.value }(
                 address(this), destinationChain, recipient, message, msg.sender
             );
-        } else if (msg.value != 0) {
-            revert InvalidFee();
-        }
+        } else if (msg.value != 0) revert InvalidFee();
         gateway.callContract(destinationChain, recipient, message);
     }
 
-    /// Decode a canonical Solana base58 address and memoize it before any message arrives, so even
-    /// the first `execute` from that sender skips the decode. Anyone may pay for this: the entry is
-    /// exactly what `OracleAddress.decode` returns, so caching never changes results.
-    function cacheSolanaAddress(
-        string calldata value
-    ) external returns (bytes32 id) {
-        id = OracleAddress.decode(value, OracleAddress.Kind.Solana);
-        solanaAddresses[keccak256(bytes(value))] = id;
-        emit SolanaAddressCached(id, value);
-    }
-
     /// Anyone may execute, but only the gateway can approve the exact destination-bound message.
-    /// A Solana sender missing from the memo is decoded once and memoized after validation.
     function execute(
         bytes32 commandId,
         string calldata sourceChain,
@@ -129,23 +109,9 @@ contract AxelarOracle is BoundedOracle {
         bytes calldata payload
     ) external {
         Route memory r = route(sourceChain);
-        bytes32 sender;
-        bytes32 cacheKey;
-        if (r.kind == OracleAddress.Kind.Solana) {
-            cacheKey = keccak256(bytes(sourceAddress));
-            sender = solanaAddresses[cacheKey];
-            if (sender != 0) cacheKey = 0;
-            else sender = OracleAddress.decode(sourceAddress, r.kind);
-        } else {
-            sender = OracleAddress.decode(sourceAddress, r.kind);
-        }
+        bytes32 sender = OracleAddress.decode(sourceAddress, r.kind);
         if (!gateway.validateContractCall(commandId, sourceChain, sourceAddress, keccak256(payload))) {
             revert NotApproved();
-        }
-        // The all-zero ID is indistinguishable from absent, so it is never memoized.
-        if (cacheKey != 0 && sender != 0) {
-            solanaAddresses[cacheKey] = sender;
-            emit SolanaAddressCached(sender, sourceAddress);
         }
         _record(r.chainId, sender, payload);
     }
