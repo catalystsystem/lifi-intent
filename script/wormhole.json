@@ -15,6 +15,54 @@
     "optimismsepolia": {
       "wormhole": "0x31377888146f3253211EFEf5c676D41ECe7D58Fe",
       "oracle": "0xb516aD609f9609C914F5292084398B44fBE84A0C"
+    },
+    "ethereum": {
+      "wormhole": "0x98f3c9e6E3fAce36bAAd05FE09d375Ef1464288B"
+    },
+    "bsc": {
+      "wormhole": "0x98f3c9e6E3fAce36bAAd05FE09d375Ef1464288B"
+    },
+    "polygon": {
+      "wormhole": "0x7A4B5a56256163F07b2C80A7cA55aBE66c4ec4d7"
+    },
+    "avalanche": {
+      "wormhole": "0x54a8e5f9c4CbA08F9943965859F6c34eAF03E26c"
+    },
+    "celo": {
+      "wormhole": "0xa321448d90d4e5b0A732867c18eA198e75CAC48E"
+    },
+    "arbitrum": {
+      "wormhole": "0xa5f208e072434bC67592E4C49C1B991BA79BCA46"
+    },
+    "optimism": {
+      "wormhole": "0xEe91C335eab126dF5fDB3797EA9d6aD93aeC9722"
+    },
+    "base": {
+      "wormhole": "0xbebdb6C8ddC678FfA9f8748f85C815C556Dd8ac6"
+    },
+    "unichain": {
+      "wormhole": "0xCa1D5a146B03f6303baF59e5AD5615ae0b9d146D"
+    },
+    "worldchain": {
+      "wormhole": "0xcbcEe4e081464A15d8Ad5f58BB493954421eB506"
+    },
+    "ink": {
+      "wormhole": "0xCa1D5a146B03f6303baF59e5AD5615ae0b9d146D"
+    },
+    "hyperevm": {
+      "wormhole": "0x7C0faFc4384551f063e05aee704ab943b8B53aB3"
+    },
+    "monad": {
+      "wormhole": "0x194B123c5E96B9b2E49763619985790Dc241CAC0"
+    },
+    "tempo": {
+      "wormhole": "0xbebdb6C8ddC678FfA9f8748f85C815C556Dd8ac6"
+    },
+    "arc": {
+      "wormhole": "0xC8aD24fC6063c41cB5C12a8e3851AafC3b3CF027"
+    },
+    "robinhood": {
+      "wormhole": "0x141fBa8AD5D61bdaB45A047cF60b5Ad9784987FB"
     }
   },
   "chainids": [
@@ -33,6 +81,10 @@
     [
       11155420,
       10005
+    ],
+    [
+      1151111081099712,
+      1
     ]
   ]
 }
