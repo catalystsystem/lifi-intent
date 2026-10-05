@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 import { AxelarOracle } from "../../../src/integrations/oracles/axelar/AxelarOracle.sol";
 import { BoundedOracle } from "../../../src/integrations/oracles/common/BoundedOracle.sol";
+import { MappedOracle } from "../../../src/integrations/oracles/common/MappedOracle.sol";
 import { OracleAddress } from "../../../src/integrations/oracles/common/OracleAddress.sol";
 import { MessageEncodingLib } from "../../../src/libs/MessageEncodingLib.sol";
 import { BoundAttester } from "./BoundAttester.sol";
@@ -99,11 +100,11 @@ contract AxelarOracleTest is Test {
         vm.prank(address(0xBEEF));
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, address(0xBEEF)));
         axelar.setChainMap("evm", 1, OracleAddress.Kind.Evm);
-        vm.expectRevert(AxelarOracle.ZeroValue.selector);
+        vm.expectRevert(MappedOracle.ZeroValue.selector);
         axelar.setChainMap("evm", 0, OracleAddress.Kind.Evm);
-        vm.expectRevert(AxelarOracle.AlreadySet.selector);
+        vm.expectRevert(MappedOracle.AlreadySet.selector);
         axelar.setChainMap("stellar", 2, OracleAddress.Kind.Evm);
-        vm.expectRevert(AxelarOracle.AlreadySet.selector);
+        vm.expectRevert(MappedOracle.AlreadySet.selector);
         axelar.setChainMap("evm", CHAIN, OracleAddress.Kind.Evm);
         string[4] memory bad = ["Evm", "", "abcdefghijklmnopqrstu", "e_vm"];
         for (uint256 i; i < bad.length; ++i) {

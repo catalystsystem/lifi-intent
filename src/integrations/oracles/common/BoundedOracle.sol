@@ -11,7 +11,6 @@ abstract contract BoundedOracle is BaseInputOracle {
     error UnknownChain();
     error MessageLimit();
     error NotAttested();
-    error InvalidOptions();
     uint256 public constant MAX_PAYLOADS = 4;
     uint256 public constant MAX_PAYLOAD = 684;
     uint256 public constant MAX_MESSAGE = 2778;
@@ -55,15 +54,6 @@ abstract contract BoundedOracle is BaseInputOracle {
                 _attestations[chain][sender][application][hashes[i]] = true;
                 emit OutputProven(chain, sender, application, hashes[i]);
             }
-        }
-    }
-
-    /// A single Type-3 lzReceive option, positive gas, zero receiver value. No compose/drop/ordered options.
-    function _checkOptions(
-        bytes calldata options
-    ) internal pure {
-        if (options.length != 22 || bytes6(options[:6]) != hex"000301001101" || uint128(bytes16(options[6:22])) == 0) {
-            revert InvalidOptions();
         }
     }
 }

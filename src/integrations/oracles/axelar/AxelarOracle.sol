@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import { Ownable } from "openzeppelin/access/Ownable.sol";
-
-import { BoundedOracle } from "../common/BoundedOracle.sol";
+import { MappedOracle } from "../common/MappedOracle.sol";
 import { OracleAddress } from "../common/OracleAddress.sol";
 import { SolanaEnvelope } from "./SolanaEnvelope.sol";
 
@@ -32,8 +30,8 @@ interface IAxelarNativeGasService {
 }
 
 /// Transparent Axelar GMP oracle with owner-set immutable chain maps (ChainMap conventions keyed by lowercase
-/// Axelar name). Based on OIF PR #137; supports Stellar and Solana sender identities.
-contract AxelarOracle is BoundedOracle, Ownable {
+/// Axelar name); supports Stellar and Solana sender identities.
+contract AxelarOracle is MappedOracle {
     enum DeliveryMode { Relayed, SelfRelay }
 
     struct Route {
@@ -45,13 +43,10 @@ contract AxelarOracle is BoundedOracle, Ownable {
     uint256 public constant MAX_CHAIN_NAME = 20;
     IAxelarMessageGateway public immutable gateway;
     IAxelarNativeGasService public immutable gasService;
-    mapping(bytes32 => Route) private routes;
-    mapping(uint256 chainId => bytes32 nameKey) public reverseChainIdMap;
+    mapping(bytes32 nameKey => OracleAddress.Kind) private kinds;
 
     error NotApproved();
     error InvalidFee();
-    error AlreadySet();
-    error ZeroValue();
 
     event ChainMapConfigured(string name, uint256 chainId, OracleAddress.Kind kind);
 
@@ -59,7 +54,7 @@ contract AxelarOracle is BoundedOracle, Ownable {
         address owner_,
         address gateway_,
         address gasService_
-    ) Ownable(owner_) {
+    ) MappedOracle(owner_) {
         if (gateway_.code.length == 0 || gasService_.code.length == 0) revert InvalidConfiguration();
         gateway = IAxelarMessageGateway(gateway_);
         gasService = IAxelarNativeGasService(gasService_);
@@ -71,7 +66,6 @@ contract AxelarOracle is BoundedOracle, Ownable {
         uint256 chainId,
         OracleAddress.Kind kind
     ) external onlyOwner {
-        if (chainId == 0) revert ZeroValue();
         bytes calldata b = bytes(name);
         if (b.length == 0 || b.length > MAX_CHAIN_NAME) revert InvalidConfiguration();
         for (uint256 i; i < b.length; ++i) {
@@ -79,9 +73,8 @@ contract AxelarOracle is BoundedOracle, Ownable {
             if (!((c >= "a" && c <= "z") || (c >= "0" && c <= "9") || c == "-")) revert InvalidConfiguration();
         }
         bytes32 key = keccak256(b);
-        if (routes[key].chainId != 0 || reverseChainIdMap[chainId] != 0) revert AlreadySet();
-        routes[key] = Route(chainId, kind);
-        reverseChainIdMap[chainId] = key;
+        _setRoute(key, chainId);
+        kinds[key] = kind;
         emit ChainMapConfigured(name, chainId, kind);
     }
 
@@ -100,8 +93,8 @@ contract AxelarOracle is BoundedOracle, Ownable {
         for (uint256 i; i < b.length; ++i) {
             if (b[i] >= 0x41 && b[i] <= 0x5a) b[i] = bytes1(uint8(b[i]) + 32);
         }
-        r = routes[keccak256(b)];
-        if (r.chainId == 0) revert UnknownChain();
+        bytes32 key = keccak256(b);
+        r = Route(_chainId(key), kinds[key]);
         canonical = string(b);
     }
 
