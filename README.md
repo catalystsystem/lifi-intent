@@ -53,6 +53,80 @@ forge coverage --no-match-coverage "(script|test|wormhole/external/wormhole|worm
 forge script deploy --sig "run(string[])" "[<chains>]" --account <account> --slow --multi --isolate --always-use-create-2-factory --verify --broadcast [-vvvv]
 ```
 
+### Axelar deployment
+
+`script/AxelarOracle.s.sol:DeployAxelarOracle` deploys with CREATE2 (`salt = 0`), matching the
+other oracle deployment scripts. Pass the mapping owner, local gateway, and local gas service
+explicitly. The deployer can differ from the owner. Deployment does **not** configure any chain maps
+and is not restricted to Base or Arbitrum.
+
+Use verified provider addresses for the target network from
+[Axelar's mainnet contract reference](https://docs.axelar.dev/dev/reference/mainnet-contract-addresses/).
+On Base (8453) and Arbitrum (42161), both providers currently use the addresses in this example:
+
+```shell
+OWNER=0x712E90032d8f44bE276A903E1769d64dD1C7F45a
+GATEWAY=0xe432150cce91c13a887f7D836923d5597adD8E31
+GAS_SERVICE=0x2d5d7d31F671F86C782533cc367F14109a082712
+RPC=https://arb1.arbitrum.io/rpc
+
+# Verify the target network and provider code before signing.
+cast chain-id --rpc-url "$RPC"
+cast code "$GATEWAY" --rpc-url "$RPC"
+cast code "$GAS_SERVICE" --rpc-url "$RPC"
+
+# Dry run; no transactions are sent.
+forge script script/AxelarOracle.s.sol:DeployAxelarOracle \
+  --sig 'deploy(address,address,address)' "$OWNER" "$GATEWAY" "$GAS_SERVICE" \
+  --rpc-url "$RPC" --account deployer
+
+# Deployment only; the deployer signs, not necessarily OWNER.
+forge script script/AxelarOracle.s.sol:DeployAxelarOracle \
+  --sig 'deploy(address,address,address)' "$OWNER" "$GATEWAY" "$GAS_SERVICE" \
+  --rpc-url "$RPC" --account deployer --broadcast
+```
+
+Set `ORACLE` to the returned deployed address. Verify `owner()(address)`, `gateway()(address)`,
+and `gasService()(address)` with `cast call`. CREATE2 prediction depends on the factory, salt,
+bytecode, and all constructor arguments, not the sender's nonce. Fund the deployer above Forge's
+estimated transaction cost, with headroom for fee changes; a dry run does not prove sufficient funds.
+
+#### Separate chain-map configuration
+
+`script/AxelarChainMap.s.sol:ConfigureAxelarChainMap` configures one route per invocation.
+The signing account must control the oracle's owner. Axelar names must be lowercase; names and
+canonical OIF chain IDs are set-once. Repeated configuration reverts rather than overwriting a route.
+Address kinds are `Evm = 0`, `Stellar = 1`, and `Solana = 2`.
+
+```shell
+# Example: configure the Base route on an Arbitrum oracle. Dry-run first.
+forge script script/AxelarChainMap.s.sol:ConfigureAxelarChainMap \
+  --sig 'setChainMap(address,string,uint256,uint8)' "$ORACLE" base 8453 0 \
+  --rpc-url "$RPC" --account owner
+
+# Only after checking the route and signing account:
+forge script script/AxelarChainMap.s.sol:ConfigureAxelarChainMap \
+  --sig 'setChainMap(address,string,uint256,uint8)' "$ORACLE" base 8453 0 \
+  --rpc-url "$RPC" --account owner --broadcast
+
+cast call "$ORACLE" 'route(string)((uint256,uint8))' base --rpc-url "$RPC"
+# Expected: (8453, 0).
+```
+
+The sibling [`intents-oracle-owner`](../../intents-oracle-owner/README.md) repository keeps its
+ceremony owner keys in GitHub Actions, separately from deployment. Use the target chain's
+`expectedOwner` from its reviewed configuration when that owner is intended; the example above uses
+its current Base/Arbitrum owner. Its reconciler currently supports only numeric
+`setChainMap(uint256,uint256)`, **not** Axelar's `setChainMap(string,uint256,uint8)`.
+Assigning that owner does not enable automated Axelar configuration: the reconciler needs Axelar
+support before its ceremony key can configure routes. The local configuration script is for owners
+with an available signer; it does not access GitHub-held keys.
+
+Route checks confirm configuration, not live GMP delivery. Orders must use the actual remote oracle
+addresses. EVM `submit` calls use zero `destinationConfig`; relayed delivery requires a positive,
+off-chain-estimated native gas payment. Self-relay uses zero value and still requires gateway
+approval before `execute`.
+
 ## License Notice
 
 This project is licensed under the **[GNU Lesser General Public License v3.0 only (LGPL-3.0-only)](/LICENSE)**.
