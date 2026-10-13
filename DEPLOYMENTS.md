@@ -113,3 +113,51 @@ constructor(address mailbox, address customHook, address ism)   // customHook = 
 > **Note (ZkSync Era):** ZK Stack uses non-standard CREATE/CREATE2 address derivation and requires
 > `zksolc`/`forge --zksync`. The Mailbox/IGP above are correct; the deployed HyperlaneOracle address
 > will not match other chains' deterministic addresses.
+
+## WormholeOracle
+
+`WormholeOracle` is deployed per chain with `script/wormhole.s.sol` against that chain's Wormhole **Core
+Bridge**. Deployments use CREATE2 (`salt = 0`) through the canonical factory
+`0x4e59b44847b379578588920ca78fbf26c0b4956c`. The constructor binds the owner and the local Core Bridge, so the
+address is shared only by chains with the same owner and Core Bridge (Ethereum/BSC, Base/Tempo, Unichain/Ink).
+
+```
+constructor(address owner, address wormhole)   // wormhole = local Core Bridge
+```
+
+- **Mainnet owner:** `0x712E90032d8f44bE276A903E1769d64dD1C7F45a` (intents-oracle-owner). The deploy script skips
+  chain maps when the oracle is not owned by the deployer; intents-oracle-owner sets every mainnet `setChainMap`.
+- **Testnet owner:** the deployer, which sets the chain maps from `script/wormhole.json` `.chainids`.
+- Wormhole chain IDs differ from canonical chain IDs, so every oracle maps them with `setChainMap(wormholeChainId,
+  chainId)`. Solana uses Wormhole chain ID `1` (canonical `1151111081099710` on mainnet, `1151111081099712` on
+  devnet).
+
+### Mainnets
+
+| Chain | Chain ID | Wormhole chain ID | Core bridge | WormholeOracle |
+| ----- | -------- | ----------------- | ----------- | -------------- |
+| Ethereum | 1 | 2 | [0x98f3c9e6E3fAce36bAAd05FE09d375Ef1464288B](https://etherscan.io/address/0x98f3c9e6E3fAce36bAAd05FE09d375Ef1464288B) | _pending API-1125_ |
+| BSC | 56 | 4 | [0x98f3c9e6E3fAce36bAAd05FE09d375Ef1464288B](https://bscscan.com/address/0x98f3c9e6E3fAce36bAAd05FE09d375Ef1464288B) | _pending API-1125_ |
+| Polygon | 137 | 5 | [0x7A4B5a56256163F07b2C80A7cA55aBE66c4ec4d7](https://polygonscan.com/address/0x7A4B5a56256163F07b2C80A7cA55aBE66c4ec4d7) | _pending API-1125_ |
+| Avalanche | 43114 | 6 | [0x54a8e5f9c4CbA08F9943965859F6c34eAF03E26c](https://snowtrace.io/address/0x54a8e5f9c4CbA08F9943965859F6c34eAF03E26c) | _pending API-1125_ |
+| Celo | 42220 | 14 | [0xa321448d90d4e5b0A732867c18eA198e75CAC48E](https://celoscan.io/address/0xa321448d90d4e5b0A732867c18eA198e75CAC48E) | _pending API-1125_ |
+| Arbitrum One | 42161 | 23 | [0xa5f208e072434bC67592E4C49C1B991BA79BCA46](https://arbiscan.io/address/0xa5f208e072434bC67592E4C49C1B991BA79BCA46) | _pending API-1125_ |
+| Optimism | 10 | 24 | [0xEe91C335eab126dF5fDB3797EA9d6aD93aeC9722](https://optimistic.etherscan.io/address/0xEe91C335eab126dF5fDB3797EA9d6aD93aeC9722) | _pending API-1125_ |
+| Base | 8453 | 30 | [0xbebdb6C8ddC678FfA9f8748f85C815C556Dd8ac6](https://basescan.org/address/0xbebdb6C8ddC678FfA9f8748f85C815C556Dd8ac6) | _pending API-1125_ |
+| Unichain | 130 | 44 | [0xCa1D5a146B03f6303baF59e5AD5615ae0b9d146D](https://uniscan.xyz/address/0xCa1D5a146B03f6303baF59e5AD5615ae0b9d146D) | _pending API-1125_ |
+| World Chain | 480 | 45 | [0xcbcEe4e081464A15d8Ad5f58BB493954421eB506](https://worldscan.org/address/0xcbcEe4e081464A15d8Ad5f58BB493954421eB506) | _pending API-1125_ |
+| Ink | 57073 | 46 | [0xCa1D5a146B03f6303baF59e5AD5615ae0b9d146D](https://explorer.inkonchain.com/address/0xCa1D5a146B03f6303baF59e5AD5615ae0b9d146D) | _pending API-1125_ |
+| HyperEVM | 999 | 47 | [0x7C0faFc4384551f063e05aee704ab943b8B53aB3](https://hyperevmscan.io/address/0x7C0faFc4384551f063e05aee704ab943b8B53aB3) | _pending API-1125_ |
+| Monad | 143 | 48 | [0x194B123c5E96B9b2E49763619985790Dc241CAC0](https://monadscan.com/address/0x194B123c5E96B9b2E49763619985790Dc241CAC0) | _pending API-1125_ |
+| Tempo | 4217 | 68 | [0xbebdb6C8ddC678FfA9f8748f85C815C556Dd8ac6](https://explore.mainnet.tempo.xyz/address/0xbebdb6C8ddC678FfA9f8748f85C815C556Dd8ac6) | _pending API-1125_ |
+| Arc | 5042 | 71 | `0xC8aD24fC6063c41cB5C12a8e3851AafC3b3CF027` | _pending API-1125_ |
+| Robinhood Chain | 4663 | 72 | `0x141fBa8AD5D61bdaB45A047cF60b5Ad9784987FB` | _pending API-1125_ |
+
+### Testnets
+
+| Chain | Chain ID | Wormhole chain ID | Core bridge | WormholeOracle |
+| ----- | -------- | ----------------- | ----------- | -------------- |
+| Ethereum Sepolia | 11155111 | 10002 | [0x4a8bc80Ed5a4067f1CCf107057b8270E0cC11A78](https://sepolia.etherscan.io/address/0x4a8bc80Ed5a4067f1CCf107057b8270E0cC11A78) | _pending API-1125_ |
+| Base Sepolia | 84532 | 10004 | [0x79A1027a6A159502049F10906D333EC57E95F083](https://sepolia.basescan.org/address/0x79A1027a6A159502049F10906D333EC57E95F083) | _pending API-1125_ |
+| Arbitrum Sepolia | 421614 | 10003 | [0x6b9C8671cdDC8dEab9c719bB87cBd3e782bA6a35](https://sepolia.arbiscan.io/address/0x6b9C8671cdDC8dEab9c719bB87cBd3e782bA6a35) | _pending API-1125_ |
+| Optimism Sepolia | 11155420 | 10005 | [0x31377888146f3253211EFEf5c676D41ECe7D58Fe](https://sepolia-optimism.etherscan.io/address/0x31377888146f3253211EFEf5c676D41ECe7D58Fe) | _pending API-1125_ |

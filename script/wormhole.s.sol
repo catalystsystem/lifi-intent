@@ -3,6 +3,7 @@ pragma solidity ^0.8.22;
 
 import { WormholeOracle } from "OIF/src/integrations/oracles/wormhole/WormholeOracle.sol";
 import { ChainMap } from "OIF/src/oracles/ChainMap.sol";
+import { console } from "forge-std/console.sol";
 
 import { multichain } from "./multichain.s.sol";
 
@@ -37,6 +38,15 @@ contract deployWormhole is multichain {
             pathToWormholeConfig,
             string.concat(".implementation.", activeChain, ".oracle")
         );
+
+        // Mainnet oracles are owned by intents-oracle-owner, which sets every chain map. Only the deployer-owned
+        // (testnet) oracles get their maps from `.chainids`. Read the wallet directly: `getSender()` would nest
+        // `startBroadcast` inside this `broadcast` block.
+        address oracleOwner = oracle.owner();
+        if (oracleOwner != vm.getWallets()[0]) {
+            console.log("chain maps skipped: owner %s is managed by intents-oracle-owner", oracleOwner);
+            return oracle;
+        }
 
         bytes memory chainIdData = vm.parseJson(wormholeConfig, ".chainids");
         uint256[][] memory chainIdArray = abi.decode(chainIdData, (uint256[][]));
