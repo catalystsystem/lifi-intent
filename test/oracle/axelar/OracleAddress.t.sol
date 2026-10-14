@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
-import { OracleAddress } from "../../../src/integrations/oracles/common/OracleAddress.sol";
+import { OracleAddress } from "../../../src/integrations/oracles/axelar/OracleAddress.sol";
 import { MessageEncodingLib } from "../../../src/libs/MessageEncodingLib.sol";
+import { AddressStrings } from "./AddressStrings.sol";
 import { Test } from "forge-std/Test.sol";
 
 contract OracleAddressTest is Test {
@@ -15,10 +16,9 @@ contract OracleAddressTest is Test {
     }
 
     function decodeAddress(
-        string calldata value,
-        OracleAddress.Kind kind
+        string calldata value
     ) external pure returns (bytes32) {
-        return OracleAddress.decode(value, kind);
+        return OracleAddress.decode(value);
     }
 
     function decode(
@@ -29,16 +29,22 @@ contract OracleAddressTest is Test {
 
     function testFuzzStellarAddressRoundtrip(
         bytes32 id
-    ) public {
-        assertEq(
-            this.decodeAddress(OracleAddress.encode(id, OracleAddress.Kind.Stellar), OracleAddress.Kind.Stellar), id
-        );
+    ) public view {
+        assertEq(this.decodeAddress(AddressStrings.stellar(id)), id);
     }
 
     function testFuzzSolanaAddressRoundtrip(
         bytes32 id
-    ) public {
-        assertEq(this.decodeAddress(OracleAddress.encode(id, OracleAddress.Kind.Solana), OracleAddress.Kind.Solana), id);
+    ) public view {
+        assertEq(this.decodeAddress(AddressStrings.solana(id)), id);
+    }
+
+    function testFuzzEvmAddress(
+        address a
+    ) public view {
+        bytes32 id = bytes32(uint256(uint160(a)));
+        assertEq(this.decodeAddress(vm.toString(a)), id);
+        assertEq(this.decodeAddress(AddressStrings.evm(id)), id);
     }
 
     // Vectors generated with @solana/web3.js PublicKey.toBase58().
@@ -60,8 +66,8 @@ contract OracleAddressTest is Test {
             "Ed25519SigVerify111111111111111111111111111"
         ];
         for (uint256 i; i < ids.length; ++i) {
-            assertEq(OracleAddress.encode(ids[i], OracleAddress.Kind.Solana), strings[i]);
-            assertEq(this.decodeAddress(strings[i], OracleAddress.Kind.Solana), ids[i]);
+            assertEq(AddressStrings.solana(ids[i]), strings[i]);
+            assertEq(this.decodeAddress(strings[i]), ids[i]);
         }
         // 31 decoded bytes, 33 decoded bytes, a character outside the alphabet, and 45 characters.
         string[4] memory bad = [
@@ -72,18 +78,34 @@ contract OracleAddressTest is Test {
         ];
         for (uint256 i; i < bad.length; ++i) {
             vm.expectRevert();
-            this.decodeAddress(bad[i], OracleAddress.Kind.Solana);
+            this.decodeAddress(bad[i]);
         }
     }
 
     function testPublishedStrKeyAndBadChecksum() public {
         string memory zero = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
-        assertEq(OracleAddress.encode(bytes32(0), OracleAddress.Kind.Stellar), zero);
-        assertEq(this.decodeAddress(zero, OracleAddress.Kind.Stellar), bytes32(0));
-        vm.expectRevert();
-        this.decodeAddress("CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC5", OracleAddress.Kind.Stellar);
-        vm.expectRevert();
-        this.decodeAddress("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", OracleAddress.Kind.Stellar);
+        assertEq(AddressStrings.stellar(bytes32(0)), zero);
+        assertEq(this.decodeAddress(zero), bytes32(0));
+        vm.expectRevert(OracleAddress.InvalidOracleAddress.selector);
+        this.decodeAddress("CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC5");
+        vm.expectRevert(OracleAddress.InvalidOracleAddress.selector);
+        this.decodeAddress("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF");
+    }
+
+    function testMalformedShapesRejected() public {
+        string[4] memory bad = [
+            "",
+            "0x000000000000000000000000000000000000000",
+            "0x000000000000000000000000000000000000000g",
+            "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        ];
+        assertEq(bytes(bad[1]).length, 41);
+        assertEq(bytes(bad[2]).length, 42);
+        assertEq(bytes(bad[3]).length, 56);
+        for (uint256 i; i < bad.length; ++i) {
+            vm.expectRevert(OracleAddress.InvalidOracleAddress.selector);
+            this.decodeAddress(bad[i]);
+        }
     }
 
     function testTrailingMessageBytesRejected() public {
