@@ -47,6 +47,39 @@ forge test --gas-report
 forge coverage --no-match-coverage "(script|test|wormhole/external/wormhole|wormhole/external/callworm/GettersGetter)" [--report lcov]
 ```
 
+### Symbolic tests
+
+`test/oracle/axelar/AxelarStrings.symbolic.t.sol` checks `AxelarStrings` with Foundry's built-in symbolic
+executor. It runs locally only, not in CI. It needs `z3` on `PATH` (`brew install z3`).
+
+```shell
+forge test --symbolic --match-path test/oracle/axelar/AxelarStrings.symbolic.t.sol
+```
+
+Each property compares the compiled library with a small, independent, branch-free specification in the same file:
+
+- `check_chainKeyMatchesSpec`, `check_chainNameMatchesSpec`, `check_setterAcceptsExactlyCanonicalKeys`: chain-name
+  packing (including empty, over-long, NUL, non-ASCII and dirty-padding inputs), unpacking, and the chain-map
+  setter's canonical-key check.
+- `check_evmMatchesSpec`: EVM address decoding.
+- `check_evmPrefixWrongLengthReverts`, `check_unshapedLengthsRevert`: dispatch rejects `0x` strings that are not 42
+  characters, and strings whose length selects no format.
+- `check_stellarRejectsBadShape`: a 56-character string with a character outside the base32 alphabet or a version
+  other than 0x10 is rejected.
+- `check_stellarRoundTripFixedIds`: the StrKeys of four fixed ids decode back to those ids, whatever bytes follow
+  the string.
+
+Bounds: address strings are explored up to 96 bytes, and `PASS` holds within the limits in
+`[profile.default.symbolic]` (`foundry.toml`). Base58 (Solana) decoding is not covered; the fuzz and differential
+tests cover it. Plain `forge test` runs only `testSpecVectors` from this file, which checks the specifications
+against concrete vectors.
+
+Stellar checksums are only checked for fixed ids. Before any solver query, forge 1.8.4 expands the library's
+64-step table-driven CRC into an expression that roughly doubles with each symbolic step (16 steps: about 1 s,
+20 steps: about 18 s), so no property can leave any id bit symbolic. For the same reason, a library bug that
+accepts a malformed string makes `check_stellarRejectsBadShape` run indefinitely instead of failing. Checksums of
+arbitrary ids and every malformed character are covered by the fuzz and differential tests.
+
 ### Deploy
 
 ```shell
