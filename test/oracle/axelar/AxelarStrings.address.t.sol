@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
-import { OracleAddress } from "../../../src/integrations/oracles/axelar/OracleAddress.sol";
+import { AxelarStrings } from "../../../src/integrations/oracles/axelar/AxelarStrings.sol";
 import { MessageEncodingLib } from "../../../src/libs/MessageEncodingLib.sol";
 import { AddressStrings } from "./AddressStrings.sol";
 import { Test } from "forge-std/Test.sol";
 
-contract OracleAddressTest is Test {
+contract AxelarStringsAddressTest is Test {
     bytes32 constant APP = keccak256("stellar settler");
 
     function encode(
@@ -18,7 +18,7 @@ contract OracleAddressTest is Test {
     function decodeAddress(
         string calldata value
     ) external pure returns (bytes32) {
-        return OracleAddress.decode(value);
+        return AxelarStrings.decodeAddress(value);
     }
 
     function decode(
@@ -86,9 +86,9 @@ contract OracleAddressTest is Test {
         string memory zero = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
         assertEq(AddressStrings.stellar(bytes32(0)), zero);
         assertEq(this.decodeAddress(zero), bytes32(0));
-        vm.expectRevert(OracleAddress.InvalidOracleAddress.selector);
+        vm.expectRevert(AxelarStrings.InvalidOracleAddress.selector);
         this.decodeAddress("CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC5");
-        vm.expectRevert(OracleAddress.InvalidOracleAddress.selector);
+        vm.expectRevert(AxelarStrings.InvalidOracleAddress.selector);
         this.decodeAddress("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF");
     }
 
@@ -103,7 +103,7 @@ contract OracleAddressTest is Test {
         assertEq(bytes(bad[2]).length, 42);
         assertEq(bytes(bad[3]).length, 56);
         for (uint256 i; i < bad.length; ++i) {
-            vm.expectRevert(OracleAddress.InvalidOracleAddress.selector);
+            vm.expectRevert(AxelarStrings.InvalidOracleAddress.selector);
             this.decodeAddress(bad[i]);
         }
     }

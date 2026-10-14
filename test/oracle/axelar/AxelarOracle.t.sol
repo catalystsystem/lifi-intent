@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
-import { AxelarChainName } from "../../../src/integrations/oracles/axelar/AxelarChainName.sol";
 import { AxelarOracle } from "../../../src/integrations/oracles/axelar/AxelarOracle.sol";
-import { OracleAddress } from "../../../src/integrations/oracles/axelar/OracleAddress.sol";
+import { AxelarStrings } from "../../../src/integrations/oracles/axelar/AxelarStrings.sol";
 import { SolanaEnvelope } from "../../../src/integrations/oracles/axelar/SolanaEnvelope.sol";
 import { MessageEncodingLib } from "../../../src/libs/MessageEncodingLib.sol";
 import { ChainMap } from "../../../src/oracles/ChainMap.sol";
@@ -75,7 +74,7 @@ contract AxelarOracleTest is Test {
             pack("ev") | (uint256(0x6d) << 224)
         ];
         for (uint256 i; i < bad.length; ++i) {
-            vm.expectRevert(AxelarChainName.InvalidChainName.selector);
+            vm.expectRevert(AxelarStrings.InvalidChainName.selector);
             axelar.setChainMap(bad[i], 2);
         }
     }
@@ -216,18 +215,18 @@ contract AxelarOracleTest is Test {
         assertTrue(gateway.approvals(approvalKey(bytes32(0), "base", sender, m)));
 
         gateway.approve(bytes32(0), "stellar\x00", sender, address(axelar), m);
-        vm.expectRevert(AxelarChainName.InvalidChainName.selector);
+        vm.expectRevert(AxelarStrings.InvalidChainName.selector);
         axelar.execute(bytes32(0), "stellar\x00", sender, m);
         assertTrue(gateway.approvals(approvalKey(bytes32(0), "stellar\x00", sender, m)));
 
         string memory long = "abcdefghijklmnopqrstuvwxyz-012345";
         gateway.approve(bytes32(0), long, sender, address(axelar), m);
-        vm.expectRevert(AxelarChainName.InvalidChainName.selector);
+        vm.expectRevert(AxelarStrings.InvalidChainName.selector);
         axelar.execute(bytes32(0), long, sender, m);
         assertTrue(gateway.approvals(approvalKey(bytes32(0), long, sender, m)));
 
         gateway.approve(bytes32(0), "stellar", "hello", address(axelar), m);
-        vm.expectRevert(OracleAddress.InvalidOracleAddress.selector);
+        vm.expectRevert(AxelarStrings.InvalidOracleAddress.selector);
         axelar.execute(bytes32(0), "stellar", "hello", m);
         assertTrue(gateway.approvals(approvalKey(bytes32(0), "stellar", "hello", m)));
 

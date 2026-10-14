@@ -3,13 +3,14 @@ pragma solidity ^0.8.26;
 
 import { Base58 } from "@openzeppelin/contracts/utils/Base58.sol";
 
-/// @title OracleAddress
-/// @notice Axelar address string → OIF identifier.
+/// @title OracleAddressReference
+/// @notice Test-only reference: the straightforward per-character decoder `AxelarStrings.decodeAddress` must agree
+/// with.
 /// @dev The format is inferred from the string's shape. EVM: `0x`-prefixed 20-byte hex, left-padded into the
 /// identifier. Stellar: 56-character contract StrKey (`C...`, version byte 0x10) whose CRC16-XModem checksum is
 /// stored little-endian. Solana: 32–44-character base58 public key, decoded with OpenZeppelin Base58. The shapes
 /// cannot overlap: `0` is not in the base58 alphabet, and 56 is outside Solana's 32–44 length range.
-library OracleAddress {
+library OracleAddressReference {
     /// @notice The string is not a valid address of the format its shape selects.
     error InvalidOracleAddress();
 

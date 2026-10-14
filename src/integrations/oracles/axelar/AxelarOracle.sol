@@ -6,8 +6,7 @@ import { LibAddress } from "../../../libs/LibAddress.sol";
 import { MessageEncodingLib } from "../../../libs/MessageEncodingLib.sol";
 import { BaseInputOracle } from "../../../oracles/BaseInputOracle.sol";
 import { ChainMap } from "../../../oracles/ChainMap.sol";
-import { AxelarChainName } from "./AxelarChainName.sol";
-import { OracleAddress } from "./OracleAddress.sol";
+import { AxelarStrings } from "./AxelarStrings.sol";
 import { SolanaEnvelope } from "./SolanaEnvelope.sol";
 
 interface IAxelarMessageGateway {
@@ -72,13 +71,13 @@ contract AxelarOracle is BaseInputOracle, ChainMap {
     /// @notice Sets an immutable map from a packed lowercase Axelar name to an OIF chain ID.
     /// @dev `protocolChainIdentifier` must be `uint256(bytes32(bytes(name)))` for a 1–32-byte name with no NUL and no
     /// ASCII uppercase; anything else (zero, right-aligned, bytes after a NUL, uppercase) reverts
-    /// `AxelarChainName.InvalidChainName`.
+    /// `AxelarStrings.InvalidChainName`.
     function setChainMap(
         uint256 protocolChainIdentifier,
         uint256 chainId
     ) public override onlyOwner {
-        if (AxelarChainName.key(AxelarChainName.name(protocolChainIdentifier)) != protocolChainIdentifier) {
-            revert AxelarChainName.InvalidChainName();
+        if (AxelarStrings.chainKey(AxelarStrings.chainName(protocolChainIdentifier)) != protocolChainIdentifier) {
+            revert AxelarStrings.InvalidChainName();
         }
         super.setChainMap(protocolChainIdentifier, chainId);
     }
@@ -102,7 +101,7 @@ contract AxelarOracle is BaseInputOracle, ChainMap {
     ) external payable {
         uint256 key = reverseChainIdMap[destinationChainId];
         if (key == 0) revert ZeroValue();
-        string memory chain = AxelarChainName.name(key);
+        string memory chain = AxelarStrings.chainName(key);
         if (!IAttester(source).hasAttested(payloads)) revert NotAllPayloadsValid();
         bytes memory message = MessageEncodingLib.encodeMessage(source.toIdentifier(), payloads);
         if (destinationConfig != 0) message = SolanaEnvelope.encode(message, destinationConfig);
@@ -126,8 +125,8 @@ contract AxelarOracle is BaseInputOracle, ChainMap {
         string calldata sourceAddress,
         bytes calldata payload
     ) external {
-        uint256 chainId = _getMappedChainId(AxelarChainName.key(sourceChain));
-        bytes32 sender = OracleAddress.decode(sourceAddress);
+        uint256 chainId = _getMappedChainId(AxelarStrings.chainKey(sourceChain));
+        bytes32 sender = AxelarStrings.decodeAddress(sourceAddress);
         if (!gateway.validateContractCall(commandId, sourceChain, sourceAddress, keccak256(payload))) {
             revert NotApproved();
         }

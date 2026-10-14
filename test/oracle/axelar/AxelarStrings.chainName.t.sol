@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import { AxelarChainName } from "../../../src/integrations/oracles/axelar/AxelarChainName.sol";
+import { AxelarStrings } from "../../../src/integrations/oracles/axelar/AxelarStrings.sol";
 import { Test } from "forge-std/Test.sol";
 
 contract ChainNameHarness {
     function key(
         string memory chainName
     ) external pure returns (uint256) {
-        return AxelarChainName.key(chainName);
+        return AxelarStrings.chainKey(chainName);
     }
 
     function name(
         uint256 packed
     ) external pure returns (string memory) {
-        return AxelarChainName.name(packed);
+        return AxelarStrings.chainName(packed);
     }
 }
 
-/// `AxelarChainName.key` (word-at-a-time) against a byte-by-byte reference: ASCII A–Z lowercased, every other
+/// `AxelarStrings.chainKey` (word-at-a-time) against a byte-by-byte reference: ASCII A–Z lowercased, every other
 /// nonzero byte kept, 1–32 bytes, NUL rejected.
-contract AxelarChainNameTest is Test {
+contract AxelarStringsChainNameTest is Test {
     ChainNameHarness h;
 
     function setUp() public {
@@ -47,7 +47,7 @@ contract AxelarChainNameTest is Test {
         (bool success, bytes memory ret) = address(h).staticcall(abi.encodeCall(ChainNameHarness.key, (string(b))));
         assertEq(success, ok, "revert mismatch");
         if (ok) assertEq(abi.decode(ret, (uint256)), expected, "key mismatch");
-        else assertEq(ret, abi.encodeWithSelector(AxelarChainName.InvalidChainName.selector), "wrong error");
+        else assertEq(ret, abi.encodeWithSelector(AxelarStrings.InvalidChainName.selector), "wrong error");
     }
 
     function filled(
@@ -60,52 +60,52 @@ contract AxelarChainNameTest is Test {
         }
     }
 
-    /// Every byte value at every position of names of length `from`–`to`, beside `filler` neighbours.
+    /// ASCII lowercasing of one byte, the reference rule.
+    function lower(
+        uint256 c
+    ) internal pure returns (uint256) {
+        return c >= 0x41 && c <= 0x5a ? c + 32 : c;
+    }
+
+    /// Every nonzero byte value at every position of every length 1–32, beside `filler` neighbours. With one byte
+    /// differing from a uniform name, the expected key is the filler's key with that lane replaced, so each check is
+    /// O(1) and in-process; byte 0 is covered by `testNulAnywhereReverts`.
     function sweep(
-        bytes1 filler,
-        uint256 from,
-        uint256 to
-    ) internal view {
-        for (uint256 n = from; n <= to; ++n) {
+        bytes1 filler
+    ) internal pure {
+        uint256 f = lower(uint8(filler));
+        for (uint256 n = 1; n <= 32; ++n) {
             bytes memory b = filled(n, filler);
+            string memory s = string(b);
+            uint256 base;
+            for (uint256 i; i < n; ++i) {
+                base |= f << (248 - 8 * i);
+            }
             for (uint256 p; p < n; ++p) {
-                for (uint256 c; c < 256; ++c) {
+                uint256 shift = 248 - 8 * p;
+                uint256 others = base & ~(uint256(0xff) << shift);
+                for (uint256 c = 1; c < 256; ++c) {
                     b[p] = bytes1(uint8(c));
-                    uint256 fmp;
-                    assembly ("memory-safe") { fmp := mload(0x40) }
-                    check(b);
-                    // Reclaim the call's scratch allocations; otherwise memory-expansion cost grows quadratically.
-                    assembly ("memory-safe") { mstore(0x40, fmp) }
+                    uint256 got = AxelarStrings.chainKey(s);
+                    uint256 expected = others | (lower(c) << shift);
+                    if (got != expected) {
+                        string memory at = string.concat(vm.toString(n), "/", vm.toString(p), "/", vm.toString(c));
+                        assertEq(got, expected, string.concat("key mismatch at length/position/byte ", at));
+                    }
                 }
                 b[p] = filler;
             }
         }
     }
 
-    // Together: all 256 byte values at every position of every length 1–32, beside neighbours that stay
-    // unchanged (`a`) and that are lowercased (`Z`). Split only to stay under the per-test gas limit.
-    function testEveryByteLowerNeighbours1To22() public view {
-        sweep("a", 1, 22);
+    /// Together: all nonzero byte values at every position of every length 1–32, beside neighbours that stay
+    /// unchanged (`a`) and that are lowercased (`Z`).
+    function testEveryByteLowerNeighbours() public pure {
+        sweep("a");
     }
 
-    function testEveryByteLowerNeighbours23To28() public view {
-        sweep("a", 23, 28);
-    }
-
-    function testEveryByteLowerNeighbours29To32() public view {
-        sweep("a", 29, 32);
-    }
-
-    function testEveryByteUpperNeighbours1To22() public view {
-        sweep("Z", 1, 22);
-    }
-
-    function testEveryByteUpperNeighbours23To28() public view {
-        sweep("Z", 23, 28);
-    }
-
-    function testEveryByteUpperNeighbours29To32() public view {
-        sweep("Z", 29, 32);
+    function testEveryByteUpperNeighbours() public pure {
+        sweep("Z");
     }
 
     /// A single byte of every value, as a whole name: exact lowercasing boundaries.
