@@ -8,7 +8,7 @@ import { AxelarStrings } from "../src/integrations/oracles/axelar/AxelarStrings.
 
 /// @notice Configures one permanent Axelar route; broadcast with the oracle's owner.
 /// Names must be canonical Axelar chain names: 1–32 bytes, no NUL, already lowercase. The script rejects anything
-/// else before broadcasting, so a mis-cased or malformed name never reaches the permanent map.
+/// else before broadcasting, so a wrongly cased or malformed name never reaches the permanent map.
 ///
 /// Usage (omit --broadcast for a dry run):
 ///   forge script script/AxelarChainMap.s.sol:ConfigureAxelarChainMap \
