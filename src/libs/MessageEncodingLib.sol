@@ -23,6 +23,7 @@ pragma solidity ^0.8.26;
 library MessageEncodingLib {
     error TooLargePayload(uint256 size);
     error TooManyPayloads(uint256 size);
+    error TrailingMessageBytes();
 
     /**
      * @notice Encodes a number of payloads into a single message prepended as reported by an application.
@@ -69,6 +70,7 @@ library MessageEncodingLib {
                 bytes32 hashedPayload = keccak256(payload);
                 payloadHashes[index] = hashedPayload;
             }
+            if (pointer != encodedPayload.length) revert TrailingMessageBytes();
         }
     }
 }
