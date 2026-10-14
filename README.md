@@ -96,36 +96,37 @@ estimated transaction cost, with headroom for fee changes; a dry run does not pr
 `script/AxelarChainMap.s.sol:ConfigureAxelarChainMap` configures one route per invocation.
 The signing account must control the oracle's owner. Axelar names must be lowercase; names and
 canonical OIF chain IDs are set-once. Repeated configuration reverts rather than overwriting a route.
-Address kinds are `Evm = 0`, `Stellar = 1`, and `Solana = 2`.
 
 ```shell
 # Example: configure the Base route on an Arbitrum oracle. Dry-run first.
 forge script script/AxelarChainMap.s.sol:ConfigureAxelarChainMap \
-  --sig 'setChainMap(address,string,uint256,uint8)' "$ORACLE" base 8453 0 \
+  --sig 'setChainMap(address,string,uint256)' "$ORACLE" base 8453 \
   --rpc-url "$RPC" --account owner
 
 # Only after checking the route and signing account:
 forge script script/AxelarChainMap.s.sol:ConfigureAxelarChainMap \
-  --sig 'setChainMap(address,string,uint256,uint8)' "$ORACLE" base 8453 0 \
+  --sig 'setChainMap(address,string,uint256)' "$ORACLE" base 8453 \
   --rpc-url "$RPC" --account owner --broadcast
 
-cast call "$ORACLE" 'route(string)((uint256,uint8))' base --rpc-url "$RPC"
-# Expected: (8453, 0).
+cast call "$ORACLE" 'reverseChainIdMap(uint256)(bytes32)' 8453 --rpc-url "$RPC"
+# Expected: $(cast --format-bytes32-string base), the lowercase name packed left-aligned.
 ```
 
 The sibling [`intents-oracle-owner`](../../intents-oracle-owner/README.md) repository keeps its
 ceremony owner keys in GitHub Actions, separately from deployment. Use the target chain's
 `expectedOwner` from its reviewed configuration when that owner is intended; the example above uses
-its current Base/Arbitrum owner. Its reconciler currently supports only numeric
-`setChainMap(uint256,uint256)`, **not** Axelar's `setChainMap(string,uint256,uint8)`.
-Assigning that owner does not enable automated Axelar configuration: the reconciler needs Axelar
-support before its ceremony key can configure routes. The local configuration script is for owners
+its current Base/Arbitrum owner. Axelar uses the numeric `setChainMap(uint256,uint256)` that its
+reconciler already supports. The key is `uint256(bytes32(bytes(lowercaseName)))`; the oracle
+rejects keys that are not packed lowercase names. The local configuration script is for owners
 with an available signer; it does not access GitHub-held keys.
 
-Route checks confirm configuration, not live GMP delivery. Orders must use the actual remote oracle
-addresses. EVM `submit` calls use zero `destinationConfig`; relayed delivery requires a positive,
-off-chain-estimated native gas payment. Self-relay uses zero value and still requires gateway
-approval before `execute`.
+Route checks confirm configuration, not live GMP delivery. `submit` takes the destination's OIF
+chain ID and the destination oracle's Axelar address string (EVM `0x…`, Stellar `C…` StrKey, Solana
+base58), passed through unchecked. Use a nonzero `destinationConfig` only for Solana destinations;
+it selects the Borsh envelope. Clients split batches to meet the destination's limits: Stellar
+allows 1–4 payloads of ≤684 bytes, and Solana allows one payload of ≤320 bytes. Relayed delivery
+requires a positive, off-chain-estimated native gas payment. Self-relay uses zero value and still
+requires gateway approval before `execute`.
 
 ## License Notice
 
