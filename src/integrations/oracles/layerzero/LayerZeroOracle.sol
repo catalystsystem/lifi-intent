@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import { MappedOracle } from "../common/MappedOracle.sol";
+import { IAttester } from "../../../interfaces/IAttester.sol";
+import { LibAddress } from "../../../libs/LibAddress.sol";
+import { MessageEncodingLib } from "../../../libs/MessageEncodingLib.sol";
+import { BaseInputOracle } from "../../../oracles/BaseInputOracle.sol";
+import { ChainMap } from "../../../oracles/ChainMap.sol";
 
 struct Origin {
     uint32 srcEid;
@@ -61,9 +65,18 @@ interface IOracleEndpointV2 {
     ) external;
 }
 
-/// Transparent OApp: authenticated Origin.sender is preserved, never replaced by a configured peer. The owner adds
-/// set-once routes; each route pins its own libraries, executor and DVN configuration when it is added.
-contract LayerZeroOracle is MappedOracle {
+/// @title LayerZeroOracle
+/// @notice Transparent LayerZero V2 OApp: the authenticated `Origin.sender` is recorded as the proving oracle, never
+/// replaced by a configured peer.
+/// @dev The owner maps a LayerZero endpoint ID to an OIF chain through `setChainMap(eid, chainId, security)`, with
+/// `ChainMap` key `uint256(eid)`. Each map is set once and pins that route's libraries, executor and DVN configuration
+/// in the same call, so a path never runs on the endpoint's mutable defaults. The plain `ChainMap.setChainMap` is
+/// disabled. Paths open (`allowInitializePath`) only for mapped endpoint IDs, and only mapped destinations can be sent
+/// to. No Stellar message limits are enforced here beyond each route's executor `maxMessageSize`; destinations enforce
+/// their own, so clients split batches to fit.
+contract LayerZeroOracle is BaseInputOracle, ChainMap {
+    using LibAddress for address;
+
     struct UlnConfig {
         uint64 confirmations;
         uint8 requiredDVNCount;
@@ -78,10 +91,19 @@ contract LayerZeroOracle is MappedOracle {
         address executor;
     }
 
+    /// @param sendLibrary Send message library pinned for the route.
+    /// @param receiveLibrary Receive message library pinned for the route (no grace period).
+    /// @param executor Executor pinned for the route.
+    /// @param maxMessageSize Largest message the route sends; nonzero, so the library default is never inherited.
+    /// @param sendConfirmations Block confirmations required on send; not 0 or NIL (`type(uint64).max`).
+    /// @param receiveConfirmations Block confirmations required on receive; not 0 or NIL.
+    /// @param sendDvns Required send DVNs, strictly ascending, 1–127. Optional DVNs are disabled.
+    /// @param receiveDvns Required receive DVNs, strictly ascending, 1–127. Optional DVNs are disabled.
     struct Security {
         address sendLibrary;
         address receiveLibrary;
         address executor;
+        uint32 maxMessageSize;
         uint64 sendConfirmations;
         uint64 receiveConfirmations;
         address[] sendDvns;
@@ -90,54 +112,58 @@ contract LayerZeroOracle is MappedOracle {
 
     IOracleEndpointV2 public immutable endpoint;
 
+    error InvalidConfiguration();
+    error SecurityRequired();
+    error NotAllPayloadsValid();
     error OnlyEndpoint();
     error UnexpectedValue();
     error InvalidOptions();
 
-    event ChainMapConfigured(uint32 eid, uint256 chainId);
-
     constructor(
         address owner_,
         address endpoint_
-    ) MappedOracle(owner_) {
+    ) ChainMap(owner_) {
         if (endpoint_.code.length == 0) revert InvalidConfiguration();
         endpoint = IOracleEndpointV2(endpoint_);
     }
 
-    /// Set an immutable map from a LayerZero endpoint ID to an OIF chain and pin the route's security configuration.
-    /// Each endpoint ID and chain ID is set once; paths open only after this call.
+    /// @notice Disabled: a route must pin its security configuration when it is mapped.
+    /// @dev Use `setChainMap(eid, chainId, security)`.
     function setChainMap(
-        uint32 eid,
+        uint256,
+        uint256
+    ) public pure override {
+        revert SecurityRequired();
+    }
+
+    /// @notice Sets an immutable map from a LayerZero endpoint ID to an OIF chain ID and pins the route's security
+    /// configuration on the endpoint. Paths to and from `eid` open only after this call.
+    /// @dev Each endpoint ID and chain ID is set once (`ChainMap.AlreadySet`); zero values revert `ChainMap.ZeroValue`.
+    /// @param eid LayerZero endpoint ID; must fit `uint32`.
+    /// @param chainId OIF chain ID.
+    /// @param s Route security configuration.
+    function setChainMap(
+        uint256 eid,
         uint256 chainId,
         Security calldata s
     ) external onlyOwner {
-        if (eid == 0) revert ZeroValue();
-        if (s.executor == address(0) || s.sendLibrary == address(0) || s.receiveLibrary == address(0)) {
-            revert InvalidConfiguration();
-        }
-        _setRoute(_key(eid), chainId);
-        endpoint.setSendLibrary(address(this), eid, s.sendLibrary);
-        endpoint.setReceiveLibrary(address(this), eid, s.receiveLibrary, 0);
+        if (eid > type(uint32).max) revert InvalidConfiguration();
+        if (
+            s.executor == address(0) || s.sendLibrary == address(0) || s.receiveLibrary == address(0)
+                || s.maxMessageSize == 0
+        ) revert InvalidConfiguration();
+        super.setChainMap(eid, chainId);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint32 id = uint32(eid); // Checked above.
+        endpoint.setSendLibrary(address(this), id, s.sendLibrary);
+        endpoint.setReceiveLibrary(address(this), id, s.receiveLibrary, 0);
         SetConfigParam[] memory sendConfig = new SetConfigParam[](2);
-        sendConfig[0] = SetConfigParam(eid, 1, abi.encode(ExecutorConfig(uint32(MAX_MESSAGE), s.executor)));
-        sendConfig[1] = SetConfigParam(eid, 2, _uln(s.sendConfirmations, s.sendDvns));
+        sendConfig[0] = SetConfigParam(id, 1, abi.encode(ExecutorConfig(s.maxMessageSize, s.executor)));
+        sendConfig[1] = SetConfigParam(id, 2, _uln(s.sendConfirmations, s.sendDvns));
         endpoint.setConfig(address(this), s.sendLibrary, sendConfig);
         SetConfigParam[] memory receiveConfig = new SetConfigParam[](1);
-        receiveConfig[0] = SetConfigParam(eid, 2, _uln(s.receiveConfirmations, s.receiveDvns));
+        receiveConfig[0] = SetConfigParam(id, 2, _uln(s.receiveConfirmations, s.receiveDvns));
         endpoint.setConfig(address(this), s.receiveLibrary, receiveConfig);
-        emit ChainMapConfigured(eid, chainId);
-    }
-
-    function route(
-        uint32 eid
-    ) external view returns (uint256) {
-        return _chainId(_key(eid));
-    }
-
-    function _key(
-        uint32 eid
-    ) private pure returns (bytes32) {
-        return bytes32(uint256(eid));
     }
 
     function _uln(
@@ -157,6 +183,7 @@ contract LayerZeroOracle is MappedOracle {
         return abi.encode(UlnConfig(confirmations, uint8(dvns.length), 255, 0, dvns, new address[](0)));
     }
 
+    /// @notice Quotes `submit` for the same arguments. Does not check that `source` attested the payloads.
     function quote(
         uint32 dstEid,
         bytes32 recipientOracle,
@@ -165,11 +192,13 @@ contract LayerZeroOracle is MappedOracle {
         bytes calldata options
     ) external view returns (MessagingFee memory) {
         _checkDestination(dstEid, options);
-        return endpoint.quote(
-            MessagingParams(dstEid, recipientOracle, _encode(source, payloads), options, false), address(this)
-        );
+        bytes memory message = MessageEncodingLib.encodeMessage(source.toIdentifier(), payloads);
+        return endpoint.quote(MessagingParams(dstEid, recipientOracle, message, options, false), address(this));
     }
 
+    /// @notice Sends attested payloads to the oracle `recipientOracle` on the mapped endpoint `dstEid`.
+    /// @dev Unmapped destinations revert `ChainMap.ZeroValue`. Excess `msg.value` is refunded to the caller by the
+    /// endpoint.
     function submit(
         uint32 dstEid,
         bytes32 recipientOracle,
@@ -178,8 +207,10 @@ contract LayerZeroOracle is MappedOracle {
         bytes calldata options
     ) external payable returns (MessagingReceipt memory) {
         _checkDestination(dstEid, options);
+        if (!IAttester(source).hasAttested(payloads)) revert NotAllPayloadsValid();
+        bytes memory message = MessageEncodingLib.encodeMessage(source.toIdentifier(), payloads);
         return endpoint.send{ value: msg.value }(
-            MessagingParams(dstEid, recipientOracle, _export(source, payloads), options, false), msg.sender
+            MessagingParams(dstEid, recipientOracle, message, options, false), msg.sender
         );
     }
 
@@ -187,7 +218,7 @@ contract LayerZeroOracle is MappedOracle {
         uint32 eid,
         bytes calldata options
     ) private view {
-        _chainId(_key(eid));
+        _getMappedChainId(eid);
         _checkOptions(options);
     }
 
@@ -203,7 +234,7 @@ contract LayerZeroOracle is MappedOracle {
     function allowInitializePath(
         Origin calldata origin
     ) external view returns (bool) {
-        return _chainIds[_key(origin.srcEid)] != 0;
+        return chainIdMap[origin.srcEid] != 0;
     }
 
     function nextNonce(
@@ -217,6 +248,7 @@ contract LayerZeroOracle is MappedOracle {
         return (1, 1);
     }
 
+    /// @notice Records the payload hashes of an endpoint-verified message under its authenticated origin.
     function lzReceive(
         Origin calldata origin,
         bytes32,
@@ -226,7 +258,11 @@ contract LayerZeroOracle is MappedOracle {
     ) external payable {
         if (msg.sender != address(endpoint)) revert OnlyEndpoint();
         if (msg.value != 0) revert UnexpectedValue();
-        uint256 chain = _chainId(_key(origin.srcEid));
-        _record(chain, origin.sender, message);
+        uint256 chainId = _getMappedChainId(origin.srcEid);
+        (bytes32 application, bytes32[] memory hashes) = MessageEncodingLib.getHashesOfEncodedPayloads(message);
+        for (uint256 i; i < hashes.length; ++i) {
+            _attestations[chainId][origin.sender][application][hashes[i]] = true;
+            emit OutputProven(chainId, origin.sender, application, hashes[i]);
+        }
     }
 }
