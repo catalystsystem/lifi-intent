@@ -132,6 +132,33 @@ allows 1–4 payloads of ≤684 bytes, and Solana allows one payload of ≤320 b
 requires a positive, off-chain-estimated native gas payment. Self-relay uses zero value and still
 requires gateway approval before `execute`.
 
+### Chainlink CCIP deployment
+
+`script/ChainlinkCCIPOracle.s.sol:DeployChainlinkCCIPOracle` deploys with CREATE2 (`salt = 0`).
+Pass the mapping owner and the target chain's CCIP router from the
+[CCIP directory](https://docs.chain.link/ccip/directory). The script rejects routers without code;
+code presence alone does not establish that the address is the official router.
+The deployer may differ from the owner. No chain maps are configured during deployment.
+
+```shell
+# Dry-run first; append --broadcast to deploy.
+forge script script/ChainlinkCCIPOracle.s.sol:DeployChainlinkCCIPOracle \
+  --sig 'deploy(address,address)' "$OWNER" "$ROUTER" \
+  --rpc-url "$RPC" --account deployer
+
+# Set ORACLE to the returned address after broadcasting.
+cast call "$ORACLE" 'owner()(address)' --rpc-url "$RPC"
+cast call "$ORACLE" 'getRouter()(address)' --rpc-url "$RPC"
+```
+
+CREATE2 predictions depend on the factory, salt, bytecode, owner, and router, not the deployer's nonce.
+The owner must configure CCIP selector → canonical chain-ID mappings separately before receiving
+proofs from those chains. Entries are set-once and cannot be corrected after signing.
+The sibling `intents-oracle-owner` reconciler supports this oracle's existing
+`setChainMap(uint256,uint256)` interface; deploy directly to the target chain's reviewed
+`expectedOwner` when using that automation, then register the deployment separately.
+Deployment checks do not prove live CCIP delivery.
+
 ## License Notice
 
 This project is licensed under the **[GNU Lesser General Public License v3.0 only (LGPL-3.0-only)](/LICENSE)**.
