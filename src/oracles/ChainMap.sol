@@ -45,7 +45,7 @@ abstract contract ChainMap is Ownable {
     function setChainMap(
         uint256 protocolChainIdentifier,
         uint256 chainId
-    ) external onlyOwner {
+    ) public virtual onlyOwner {
         if (protocolChainIdentifier == 0) revert ZeroValue();
         if (chainId == 0) revert ZeroValue();
 

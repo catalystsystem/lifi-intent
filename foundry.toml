@@ -15,6 +15,13 @@ fs_permissions = [
     { access = "read", path = "./test/oracle/broadcaster/payloads/ethereum-sepolia" },
 ]
 
+[profile.default.symbolic]
+solver = "z3"
+timeout = 120
+max_depth = 200000
+max_paths = 4096
+max_solver_queries = 10000
+
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
 
 

@@ -5,7 +5,7 @@
   "bitcoinOutputDispute": "71733",
   "bitcoinVerify": "135429",
   "bitcoinVerifyWithEmbed": "138039",
-  "chainlinkCCIPOracleReceive": "54301",
+  "chainlinkCCIPOracleReceive": "54316",
   "chainlinkCCIPOracleSubmit": "64949",
   "chainlinkCCIPOracleSubmitFeeToken": "117226",
   "citreaFinaliseDispute": "63284",
@@ -14,7 +14,7 @@
   "citreaOutputDispute": "71733",
   "citreaVerify": "130685",
   "citreaVerifyWithEmbed": "133295",
-  "hyperlaneOracleHandle": "50281",
+  "hyperlaneOracleHandle": "50296",
   "hyperlaneOracleSubmit": "67472",
   "hyperlaneOracleSubmitCustomHook": "67848",
   "wormholeOracleSubmit": "42648"
