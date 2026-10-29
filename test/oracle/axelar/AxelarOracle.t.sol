@@ -79,22 +79,84 @@ contract AxelarOracleTest is Test {
         }
     }
 
-    function testSetChainMapAcceptsAnyCharsetAndFullWord() public {
-        axelar.setChainMap(pack("a"), 2);
-        axelar.setChainMap(pack("e_vm.2"), 3);
-        axelar.setChainMap(pack("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), 4);
-        axelar.setChainMap(uint256(bytes32(hex"c3a9")), 5); // UTF-8 "é": bytes >= 0x80 are kept
-        assertEq(axelar.chainIdMap(pack("a")), 2);
-        assertEq(axelar.chainIdMap(pack("e_vm.2")), 3);
-        assertEq(axelar.chainIdMap(pack("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")), 4);
-        assertEq(axelar.reverseChainIdMap(4), type(uint256).max / 0xff * 0x61);
+    /// A rejected name leaves both maps empty and does not consume `chainId`: `valid` can still take it.
+    function assertRejectedThenFree(
+        uint256 key,
+        uint256 chainId,
+        string memory valid
+    ) internal {
+        vm.expectRevert(AxelarStrings.InvalidChainName.selector);
+        axelar.setChainMap(key, chainId);
+        assertEq(axelar.chainIdMap(key), 0);
+        assertEq(axelar.reverseChainIdMap(chainId), 0);
+        axelar.setChainMap(pack(valid), chainId);
+        assertEq(axelar.reverseChainIdMap(chainId), pack(valid));
     }
 
-    function testSubmitForwardsFullWordName() public {
-        string memory name = "abcdefghijklmnopqrstuvwxyz-01234";
-        axelar.setChainMap(pack(name), 32);
+    function testSetChainMapRejectsUnderscore() public {
+        assertRejectedThenFree(pack("_evm"), 2, "evm-a");
+        assertRejectedThenFree(pack("e_vm"), 3, "evm-b");
+        assertRejectedThenFree(pack("evm_"), 4, "evm-c");
+        assertRejectedThenFree(pack("aaaaaaaaaaaaaaaaaaa_"), 5, "evm-d"); // byte 19 of a 20-byte name
+    }
+
+    function testFuzzSetChainMapRejectsUnderscore(
+        uint256 length,
+        uint256 at,
+        uint256 chainId
+    ) public {
+        length = bound(length, 1, 20);
+        at = bound(at, 0, length - 1);
+        vm.assume(chainId != 0 && chainId != CHAIN);
+        bytes memory name = bytes("aaaaaaaaaaaaaaaaaaaa");
+        name[at] = "_";
+        assertRejectedThenFree(pack(string(name)) & ~(type(uint256).max >> (8 * length)), chainId, "evm");
+    }
+
+    function testSetChainMapLengthBound() public {
+        axelar.setChainMap(pack("a"), 2);
+        axelar.setChainMap(pack("aaaaaaaaaaaaaaaaaaaa"), 3); // 20 bytes
+        assertEq(axelar.chainIdMap(pack("a")), 2);
+        assertEq(axelar.reverseChainIdMap(3), pack("aaaaaaaaaaaaaaaaaaaa"));
+        assertRejectedThenFree(pack("aaaaaaaaaaaaaaaaaaaaa"), 4, "evm-a"); // 21 bytes
+        assertRejectedThenFree(type(uint256).max / 0xff * 0x61, 5, "evm-b"); // 32 bytes
+    }
+
+    function testFuzzSetChainMapRejectsLongNames(
+        uint256 length,
+        uint256 chainId
+    ) public {
+        length = bound(length, 21, 32);
+        vm.assume(chainId != 0 && chainId != CHAIN);
+        uint256 key = type(uint256).max / 0xff * 0x61 & ~(type(uint256).max >> (8 * length));
+        assertRejectedThenFree(key, chainId, "evm");
+    }
+
+    function testSetChainMapAsciiBound() public {
+        axelar.setChainMap(uint256(bytes32(hex"617f")), 2); // DEL, the highest ASCII byte, is accepted
+        assertEq(axelar.chainIdMap(uint256(bytes32(hex"617f"))), 2);
+        assertRejectedThenFree(uint256(bytes32(hex"6180")), 3, "evm-a");
+        assertRejectedThenFree(uint256(bytes32(hex"c3a9")), 4, "evm-b"); // UTF-8 "é"
+    }
+
+    function testFuzzSetChainMapRejectsNonAscii(
+        uint256 b,
+        uint256 at,
+        uint256 chainId
+    ) public {
+        b = bound(b, 0x80, 0xff);
+        at = bound(at, 0, 19);
+        vm.assume(chainId != 0 && chainId != CHAIN);
+        bytes memory name = bytes("aaaaaaaaaaaaaaaaaaaa");
+        name[at] = bytes1(uint8(b));
+        assertRejectedThenFree(pack(string(name)), chainId, "evm");
+    }
+
+    function testSubmitForwardsMaxLengthName() public {
+        string memory name = "abcdefghijklmnop-012";
+        axelar.setChainMap(pack(name), 20);
         source.setOracle(address(axelar));
-        axelar.submit(32, "r", address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.SelfRelay);
+        axelar.submit(20, "r", address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.SelfRelay);
         assertEq(gateway.lastChain(), name);
     }
 

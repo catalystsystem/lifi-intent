@@ -94,9 +94,11 @@ estimated transaction cost, with headroom for fee changes; a dry run does not pr
 #### Separate chain-map configuration
 
 `script/AxelarChainMap.s.sol:ConfigureAxelarChainMap` configures one route per invocation.
-The signing account must control the oracle's owner. Axelar names must be lowercase (1–32 bytes, no NUL);
-the script packs the name with `AxelarStrings.chainKey` and refuses, before broadcasting, any name whose packed
-key differs from its raw bytes, such as `Base`. Names and canonical OIF chain IDs are set-once. Repeated
+The signing account must control the oracle's owner. Axelar names must be lowercase with no NUL, and
+must satisfy Axelar's `ChainNameRaw` rule: 1–20 ASCII bytes, no `_`. The script packs the name with
+`AxelarStrings.chainKey` and refuses, before broadcasting, any name whose packed key differs from its raw bytes,
+such as `Base`; the oracle's setter rejects names that are too long, non-ASCII or contain `_`, which Forge's
+simulation also catches before broadcasting. Names and canonical OIF chain IDs are set-once. Repeated
 configuration reverts rather than overwriting a route.
 
 ```shell

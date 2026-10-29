@@ -36,9 +36,9 @@ interface IAxelarNativeGasService {
 /// @title AxelarOracle
 /// @notice Transparent Axelar GMP oracle with owner-set, immutable chain maps.
 /// @dev The owner maps an Axelar chain to an OIF chain through `ChainMap.setChainMap(key, chainId)`, where `key` is
-/// the ASCII-lowercased Axelar name packed left-aligned and zero-padded: `uint256(bytes32(bytes(name)))`. Names are
-/// 1–32 bytes without NUL; no other character set is imposed, so `reverseChainIdMap(chainId)` returns the packed
-/// name, which `submit` unpacks into the outbound chain name. Axelar currently caps names at 20 bytes.
+/// the ASCII-lowercased Axelar name packed left-aligned and zero-padded: `uint256(bytes32(bytes(name)))`. The setter
+/// accepts only names Axelar can route (1–20 ASCII bytes without NUL or `_`), so `reverseChainIdMap(chainId)` returns
+/// the packed name, which `submit` unpacks into the outbound chain name.
 /// Inbound sender formats (EVM hex, Stellar StrKey, Solana base58) are inferred from the
 /// sender string. No Stellar message limits are enforced here; Stellar and Solana destinations enforce their own,
 /// so clients split batches to fit.
@@ -58,6 +58,9 @@ contract AxelarOracle is BaseInputOracle, ChainMap {
     error NotApproved();
     error InvalidFee();
 
+    /// @dev Axelar `ChainNameRaw::MAX_LEN`: the longest chain name Axelar routes.
+    uint256 private constant MAX_CHAIN_NAME = 20;
+
     constructor(
         address owner_,
         address gateway_,
@@ -69,15 +72,19 @@ contract AxelarOracle is BaseInputOracle, ChainMap {
     }
 
     /// @notice Sets an immutable map from a packed lowercase Axelar name to an OIF chain ID.
-    /// @dev `protocolChainIdentifier` must be `uint256(bytes32(bytes(name)))` for a 1–32-byte name with no NUL and no
-    /// ASCII uppercase; anything else (zero, right-aligned, bytes after a NUL, uppercase) reverts
-    /// `AxelarStrings.InvalidChainName`.
+    /// @dev `protocolChainIdentifier` must be `uint256(bytes32(bytes(name)))` for a name Axelar's `ChainNameRaw`
+    /// accepts (1–20 bytes, ASCII only, no `_`), with no NUL and no ASCII uppercase. Anything else (zero,
+    /// right-aligned, bytes after a NUL, uppercase, too long, non-ASCII, `_`) reverts `AxelarStrings.InvalidChainName`:
+    /// the map is set-once, so a name Axelar cannot route would permanently consume `chainId`.
     function setChainMap(
         uint256 protocolChainIdentifier,
         uint256 chainId
     ) public override onlyOwner {
-        if (AxelarStrings.chainKey(AxelarStrings.chainName(protocolChainIdentifier)) != protocolChainIdentifier) {
-            revert AxelarStrings.InvalidChainName();
+        bytes memory name = bytes(AxelarStrings.chainName(protocolChainIdentifier));
+        if (AxelarStrings.chainKey(string(name)) != protocolChainIdentifier) revert AxelarStrings.InvalidChainName();
+        if (name.length > MAX_CHAIN_NAME) revert AxelarStrings.InvalidChainName();
+        for (uint256 i; i < name.length; ++i) {
+            if (name[i] >= 0x80 || name[i] == "_") revert AxelarStrings.InvalidChainName();
         }
         super.setChainMap(protocolChainIdentifier, chainId);
     }
