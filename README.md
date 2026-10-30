@@ -94,8 +94,9 @@ estimated transaction cost, with headroom for fee changes; a dry run does not pr
 #### Separate chain-map configuration
 
 `script/AxelarChainMap.s.sol:ConfigureAxelarChainMap` configures one route per invocation.
-The signing account must control the oracle's owner. Axelar names must be lowercase with no NUL, and
-must satisfy Axelar's `ChainNameRaw` rule: 1–20 ASCII bytes, no `_`. The script packs the name with
+The signing account must control the oracle's owner. Stored lookup names must be lowercase with no
+NUL and satisfy Axelar's `ChainNameRaw` rule: 1–20 ASCII bytes, no `_`. These are internal keys,
+not the outbound spelling: register `ethereum` for Axelar's `Ethereum`. The script packs the name with
 `AxelarStrings.chainKey` and refuses, before broadcasting, any name whose packed key differs from its raw bytes,
 such as `Base`; the oracle's setter rejects names that are too long, non-ASCII or contain `_`, which Forge's
 simulation also catches before broadcasting. Names and canonical OIF chain IDs are set-once. Repeated
@@ -124,13 +125,23 @@ reconciler already supports. The key is `uint256(bytes32(bytes(lowercaseName)))`
 rejects keys that are not packed lowercase names. The local configuration script is for owners
 with an available signer; it does not access GitHub-held keys.
 
-Route checks confirm configuration, not live GMP delivery. `submit` takes the destination's OIF
-chain ID and the destination oracle's Axelar address string (EVM `0x…`, Stellar `C…` StrKey, Solana
-base58), passed through unchecked. Use a nonzero `destinationConfig` only for Solana destinations;
+Route checks confirm configuration, not live GMP delivery. `submit` takes the exact Axelar
+destination-chain string, not a numeric OIF chain ID. It lowercases the name only to check that its
+mapping exists, then sends the original string unchanged to both the gas service and gateway.
+For example, pass `Ethereum` with a configured `ethereum` lookup key. Callers must obtain the exact
+registered spelling from Axelar; the lookup does not enforce that spelling. An incorrect spelling
+can waste the delivery fee, but does not consume the source attestations.
+The destination oracle's Axelar address string (EVM `0x…`, Stellar `C…` StrKey, Solana base58)
+is also passed through unchecked. Use a nonzero `destinationConfig` only for Solana destinations;
 it selects the Borsh envelope. Clients split batches to meet the destination's limits: Stellar
 allows 1–4 payloads of ≤684 bytes, and Solana allows one payload of ≤320 bytes. Relayed delivery
 requires a positive, off-chain-estimated native gas payment. Self-relay uses zero value and still
 requires gateway approval before `execute`.
+
+The ABI is `submit(string,string,address,bytes[],bytes32,uint8)`; there is no numeric-ID overload.
+Callers must supply Axelar's exact name instead of the OIF chain ID. Inbound `execute` is unchanged:
+it normalizes only for lookup and validates the original source strings with the gateway.
+This change requires a new oracle deployment; existing immutable deployments retain the old ABI.
 
 ### Chainlink CCIP deployment
 

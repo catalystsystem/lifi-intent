@@ -156,7 +156,7 @@ contract AxelarOracleTest is Test {
         string memory name = "abcdefghijklmnop-012";
         axelar.setChainMap(pack(name), 20);
         source.setOracle(address(axelar));
-        axelar.submit(20, "r", address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.SelfRelay);
+        axelar.submit(name, "r", address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.SelfRelay);
         assertEq(gateway.lastChain(), name);
     }
 
@@ -185,7 +185,7 @@ contract AxelarOracleTest is Test {
         source.setOracle(address(axelar));
         string memory recipient = AddressStrings.stellar(SENDER);
         axelar.submit{ value: 10 }(
-            CHAIN, recipient, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed
+            "stellar", recipient, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed
         );
         assertEq(gateway.lastChain(), "stellar");
         assertEq(gateway.lastGasChain(), "stellar");
@@ -200,18 +200,70 @@ contract AxelarOracleTest is Test {
         string memory recipient = AddressStrings.stellar(SENDER);
         vm.expectRevert(AxelarOracle.NotAllPayloadsValid.selector);
         axelar.submit{ value: 10 }(
-            CHAIN, recipient, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed
+            "stellar", recipient, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed
         );
         source.setOracle(address(axelar));
         vm.expectRevert(ChainMap.ZeroValue.selector);
         axelar.submit{ value: 10 }(
-            999, recipient, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed
+            "unknown", recipient, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed
         );
         vm.expectRevert(AxelarOracle.InvalidFee.selector);
-        axelar.submit(CHAIN, recipient, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed);
+        axelar.submit("stellar", recipient, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed);
         vm.expectRevert(AxelarOracle.InvalidFee.selector);
         axelar.submit{ value: 1 }(
-            CHAIN, recipient, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.SelfRelay
+            "stellar", recipient, address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.SelfRelay
+        );
+    }
+
+    function testSubmitMixedCaseUsesConfiguredMapping() public {
+        axelar.setChainMap(pack("ethereum"), 1);
+        vm.expectRevert(AxelarOracle.NotAllPayloadsValid.selector);
+        axelar.submit("Ethereum", "r", address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.SelfRelay);
+
+        source.setOracle(address(axelar));
+        axelar.submit("Ethereum", "r", address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.SelfRelay);
+        assertEq(gateway.lastChain(), "Ethereum");
+        assertEq(gateway.paid(), 0);
+        axelar.submit{ value: 10 }(
+            "Ethereum", "r", address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed
+        );
+        assertEq(gateway.lastChain(), "Ethereum");
+        assertEq(gateway.lastGasChain(), "Ethereum");
+        assertEq(gateway.paid(), 10);
+        assertEq(address(axelar).balance, 0);
+        assertEq(axelar.chainIdMap(pack("ethereum")), 1);
+        assertEq(axelar.chainIdMap(pack("Ethereum")), 0);
+        assertEq(axelar.reverseChainIdMap(1), pack("ethereum"));
+    }
+
+    function assertDestinationRejectedBeforeFees(
+        string memory destination,
+        bytes4 expectedError
+    ) internal {
+        uint256 balanceBefore = address(this).balance;
+        for (uint256 mode; mode < 2; ++mode) {
+            for (uint256 fee; fee < 2; ++fee) {
+                vm.expectRevert(expectedError);
+                axelar.submit{ value: fee }(
+                    destination, "r", address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode(mode)
+                );
+                assertEq(gateway.paid(), 0);
+                assertEq(address(gateway).balance, 0);
+                assertEq(address(axelar).balance, 0);
+                assertEq(address(this).balance, balanceBefore);
+            }
+        }
+    }
+
+    function testSubmitRejectsUnknownAndMalformedDestinationsBeforeFees() public {
+        source.setOracle(address(axelar));
+        assertDestinationRejectedBeforeFees("unknown", ChainMap.ZeroValue.selector);
+        assertDestinationRejectedBeforeFees("", AxelarStrings.InvalidChainName.selector);
+        assertDestinationRejectedBeforeFees(string(hex"7374656c6c617200"), AxelarStrings.InvalidChainName.selector);
+        // Names longer than the setter's 20-byte limit cannot have a configured mapping.
+        assertDestinationRejectedBeforeFees("aaaaaaaaaaaaaaaaaaaaa", ChainMap.ZeroValue.selector);
+        assertDestinationRejectedBeforeFees(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", AxelarStrings.InvalidChainName.selector
         );
     }
 
@@ -224,17 +276,17 @@ contract AxelarOracleTest is Test {
         bytes32 config = keccak256("config");
         bytes memory raw = this.encode(bytes32(uint256(uint160(address(source)))), p);
 
-        axelar.submit(9, recipient, address(source), p, config, AxelarOracle.DeliveryMode.SelfRelay);
+        axelar.submit("solana", recipient, address(source), p, config, AxelarOracle.DeliveryMode.SelfRelay);
         assertEq(gateway.lastChain(), "solana");
         assertEq(gateway.paid(), 0);
         assertEq(gateway.lastMessage(), bytes.concat(hex"0064010000", raw, hex"01000000", config, hex"00"));
 
-        axelar.submit(9, recipient, address(source), p, bytes32(0), AxelarOracle.DeliveryMode.SelfRelay);
+        axelar.submit("solana", recipient, address(source), p, bytes32(0), AxelarOracle.DeliveryMode.SelfRelay);
         assertEq(gateway.lastMessage(), raw);
 
         p[0] = new bytes(321);
         vm.expectRevert(SolanaEnvelope.InvalidSolanaEnvelope.selector);
-        axelar.submit(9, recipient, address(source), p, config, AxelarOracle.DeliveryMode.SelfRelay);
+        axelar.submit("solana", recipient, address(source), p, config, AxelarOracle.DeliveryMode.SelfRelay);
     }
 
     // --- Execute --- //
