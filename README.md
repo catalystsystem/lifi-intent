@@ -94,12 +94,13 @@ estimated transaction cost, with headroom for fee changes; a dry run does not pr
 #### Separate chain-map configuration
 
 `script/AxelarChainMap.s.sol:ConfigureAxelarChainMap` configures one route per invocation.
-The signing account must control the oracle's owner. Axelar names must be lowercase with no NUL, and
-must satisfy Axelar's `ChainNameRaw` rule: 1–20 ASCII bytes, no `_`. The script packs the name with
-`AxelarStrings.chainKey` and refuses, before broadcasting, any name whose packed key differs from its raw bytes,
-such as `Base`; the oracle's setter rejects names that are too long, non-ASCII or contain `_`, which Forge's
-simulation also catches before broadcasting. Names and canonical OIF chain IDs are set-once. Repeated
-configuration reverts rather than overwriting a route.
+The signing account must control the oracle's owner. Use Axelar's exact registered spelling,
+including case: `Ethereum`, `Polygon`, `Avalanche`, but `base`. Names must have no NUL and satisfy
+Axelar's `ChainNameRaw` rule: 1–20 ASCII bytes, no `_`. The script packs the original bytes with
+`AxelarStrings.chainKey`; the oracle rejects malformed packing, excessive length, non-ASCII bytes
+and `_`. These checks validate the format, not whether Axelar has registered the name.
+Names and canonical OIF chain IDs are set-once, so check the spelling before broadcasting:
+a wrongly cased name cannot later be corrected for that chain ID.
 
 ```shell
 # Example: configure the Base route on an Arbitrum oracle. Dry-run first.
@@ -113,24 +114,31 @@ forge script script/AxelarChainMap.s.sol:ConfigureAxelarChainMap \
   --rpc-url "$RPC" --account owner --broadcast
 
 cast call "$ORACLE" 'reverseChainIdMap(uint256)(bytes32)' 8453 --rpc-url "$RPC"
-# Expected: $(cast --format-bytes32-string base), the lowercase name packed left-aligned.
+# Expected: $(cast --format-bytes32-string base), the exact name packed left-aligned.
 ```
 
 The sibling [`intents-oracle-owner`](../../intents-oracle-owner/README.md) repository keeps its
 ceremony owner keys in GitHub Actions, separately from deployment. Use the target chain's
 `expectedOwner` from its reviewed configuration when that owner is intended; the example above uses
 its current Base/Arbitrum owner. Axelar uses the numeric `setChainMap(uint256,uint256)` that its
-reconciler already supports. The key is `uint256(bytes32(bytes(lowercaseName)))`; the oracle
-rejects keys that are not packed lowercase names. The local configuration script is for owners
-with an available signer; it does not access GitHub-held keys.
+reconciler already supports. The key is `uint256(bytes32(bytes(name)))`, preserving case.
+Owner tooling must preserve those bytes and allow uppercase names; lowercase-only validation or
+packing must be updated before configuring `Ethereum`, `Polygon` or `Avalanche`. The local
+configuration script is for owners with an available signer; it does not access GitHub-held keys.
 
-Route checks confirm configuration, not live GMP delivery. `submit` takes the destination's OIF
-chain ID and the destination oracle's Axelar address string (EVM `0x…`, Stellar `C…` StrKey, Solana
-base58), passed through unchecked. Use a nonzero `destinationConfig` only for Solana destinations;
+Route checks confirm configuration, not live GMP delivery. `submit` still takes the destination's
+numeric OIF chain ID and sends the exact stored name to both the Axelar gas service and gateway.
+Inbound `execute` looks up the exact `sourceChain`: case variants are different keys. It passes
+the original source strings to gateway validation unchanged. The destination oracle's Axelar
+address string (EVM `0x…`, Stellar `C…` StrKey, Solana base58) is passed through unchecked.
+Use a nonzero `destinationConfig` only for Solana destinations;
 it selects the Borsh envelope. Clients split batches to meet the destination's limits: Stellar
 allows 1–4 payloads of ≤684 bytes, and Solana allows one payload of ≤320 bytes. Relayed delivery
 requires a positive, off-chain-estimated native gas payment. Self-relay uses zero value and still
 requires gateway approval before `execute`.
+
+This change requires a new oracle deployment; existing immutable deployments retain their old
+normalization behavior. Register exact names on the new deployment before sending or receiving.
 
 ### Chainlink CCIP deployment
 
