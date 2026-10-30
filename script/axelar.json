@@ -1,0 +1,16 @@
+{
+  "implementation": {
+    "ethereum": { "chainId": 1, "gateway": "0x4F4495243837681061C4743b74B3eEdf548D56A5", "gasService": "0x2d5d7d31F671F86C782533cc367F14109a082712" },
+    "bsc": { "chainId": 56, "gateway": "0x304acf330bbE08d1e512eefaa92F6a57871fD895", "gasService": "0x2d5d7d31F671F86C782533cc367F14109a082712" },
+    "polygon": { "chainId": 137, "gateway": "0x6f015F16De9fC8791b234eF68D486d2bF203FBA8", "gasService": "0x2d5d7d31F671F86C782533cc367F14109a082712" },
+    "avalanche": { "chainId": 43114, "gateway": "0x5029C0EFf6C34351a0CEc334542cDb22c7928f78", "gasService": "0x2d5d7d31F671F86C782533cc367F14109a082712" },
+    "base": { "chainId": 8453, "gateway": "0xe432150cce91c13a887f7D836923d5597adD8E31", "gasService": "0x2d5d7d31F671F86C782533cc367F14109a082712" },
+    "optimism": { "chainId": 10, "gateway": "0xe432150cce91c13a887f7D836923d5597adD8E31", "gasService": "0x2d5d7d31F671F86C782533cc367F14109a082712" },
+    "arbitrum": { "chainId": 42161, "gateway": "0xe432150cce91c13a887f7D836923d5597adD8E31", "gasService": "0x2d5d7d31F671F86C782533cc367F14109a082712" },
+    "mantle": { "chainId": 5000, "gateway": "0xe432150cce91c13a887f7D836923d5597adD8E31", "gasService": "0x2d5d7d31F671F86C782533cc367F14109a082712" },
+    "celo": { "chainId": 42220, "gateway": "0xe432150cce91c13a887f7D836923d5597adD8E31", "gasService": "0x2d5d7d31F671F86C782533cc367F14109a082712" },
+    "hyperevm": { "chainId": 999, "gateway": "0xe432150cce91c13a887f7D836923d5597adD8E31", "gasService": "0x2d5d7d31F671F86C782533cc367F14109a082712" },
+    "monad": { "chainId": 143, "gateway": "0xe432150cce91c13a887f7D836923d5597adD8E31", "gasService": "0x2d5d7d31F671F86C782533cc367F14109a082712" },
+    "arc": { "chainId": 5042, "gateway": "0xD8346AEAaE536e2A98A7B2992CE32E58bd76EC3c", "gasService": "0x4A86ab8c9b0b5C17587F6a243a8f2E5DE3067BD8" }
+  }
+}
