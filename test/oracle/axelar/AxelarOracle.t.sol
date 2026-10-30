@@ -222,10 +222,13 @@ contract AxelarOracleTest is Test {
 
         source.setOracle(address(axelar));
         axelar.submit("Ethereum", "r", address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.SelfRelay);
+        assertEq(gateway.lastChain(), "Ethereum");
         assertEq(gateway.paid(), 0);
         axelar.submit{ value: 10 }(
             "Ethereum", "r", address(source), payloads(), bytes32(0), AxelarOracle.DeliveryMode.Relayed
         );
+        assertEq(gateway.lastChain(), "Ethereum");
+        assertEq(gateway.lastGasChain(), "Ethereum");
         assertEq(gateway.paid(), 10);
         assertEq(address(axelar).balance, 0);
         assertEq(axelar.chainIdMap(pack("ethereum")), 1);
