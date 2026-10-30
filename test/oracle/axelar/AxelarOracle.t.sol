@@ -65,14 +65,7 @@ contract AxelarOracleTest is Test {
     }
 
     function testSetChainMapRejectsNonCanonicalKeys() public {
-        uint256[6] memory bad = [
-            uint256(0),
-            pack("Evm"),
-            pack("evM"),
-            pack("evm") >> 8,
-            pack("evm") | 0xff,
-            pack("ev") | (uint256(0x6d) << 224)
-        ];
+        uint256[4] memory bad = [uint256(0), pack("evm") >> 8, pack("evm") | 0xff, pack("ev") | (uint256(0x6d) << 224)];
         for (uint256 i; i < bad.length; ++i) {
             vm.expectRevert(AxelarStrings.InvalidChainName.selector);
             axelar.setChainMap(bad[i], 2);
@@ -259,12 +252,53 @@ contract AxelarOracleTest is Test {
         axelar.execute(bytes32(0), "stellar", senders[0], m);
     }
 
-    function testExecuteKeepsApprovedCase() public {
+    function testExactCanonicalNameRoundTrip() public {
+        string memory name = "Ethereum";
+        axelar.setChainMap(pack(name), 1);
+        assertEq(axelar.chainIdMap(pack(name)), 1);
+        assertEq(axelar.reverseChainIdMap(1), pack(name));
+        source.setOracle(address(axelar));
+        string memory sender = AddressStrings.stellar(SENDER);
+        bytes32 application = bytes32(uint256(uint160(address(source))));
+        for (uint256 mode; mode < 2; ++mode) {
+            bytes[] memory p = payloads();
+            p[0] = abi.encode(mode);
+            uint256 fee = mode == 0 ? 10 : 0;
+            axelar.submit{ value: fee }(1, sender, address(source), p, bytes32(0), AxelarOracle.DeliveryMode(mode));
+            assertEq(gateway.lastChain(), "Ethereum");
+            if (mode == 0) assertEq(gateway.lastGasChain(), "Ethereum");
+            assertEq(gateway.paid(), 10);
+
+            bytes memory m = gateway.lastMessage();
+            bytes32 command = bytes32(mode);
+            gateway.approve(command, name, sender, address(axelar), m);
+            axelar.execute(command, name, sender, m);
+            assertTrue(axelar.isProven(1, SENDER, application, keccak256(p[0])));
+            assertFalse(gateway.approvals(approvalKey(command, name, sender, m)));
+        }
+    }
+
+    function testExecuteCaseVariantsDoNotAlias() public {
         bytes memory m = this.encode(APP, payloads());
         string memory sender = AddressStrings.stellar(SENDER);
-        gateway.approve(bytes32(uint256(7)), "Stellar", sender, address(axelar), m);
-        axelar.execute(bytes32(uint256(7)), "Stellar", sender, m);
-        assertTrue(axelar.isProven(CHAIN, SENDER, APP, keccak256(payloads()[0])));
+        bytes32 command = bytes32(uint256(7));
+        bytes32 h = keccak256(payloads()[0]);
+        gateway.approve(command, "Stellar", sender, address(axelar), m);
+        vm.expectRevert(ChainMap.ZeroValue.selector);
+        axelar.execute(command, "Stellar", sender, m);
+        assertTrue(gateway.approvals(approvalKey(command, "Stellar", sender, m)));
+        assertFalse(axelar.isProven(CHAIN, SENDER, APP, h));
+
+        vm.expectRevert(ChainMap.AlreadySet.selector);
+        axelar.setChainMap(pack("Stellar"), CHAIN);
+        assertEq(axelar.chainIdMap(pack("Stellar")), 0);
+        assertEq(axelar.reverseChainIdMap(CHAIN), pack("stellar"));
+
+        axelar.setChainMap(pack("Stellar"), 2);
+        axelar.execute(command, "Stellar", sender, m);
+        assertTrue(axelar.isProven(2, SENDER, APP, h));
+        assertFalse(axelar.isProven(CHAIN, SENDER, APP, h));
+        assertFalse(gateway.approvals(approvalKey(command, "Stellar", sender, m)));
     }
 
     function testExecuteFailuresLeaveApproval() public {

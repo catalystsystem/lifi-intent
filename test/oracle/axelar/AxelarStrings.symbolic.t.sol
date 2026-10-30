@@ -108,8 +108,8 @@ contract AxelarStringsSymbolicTest is Test {
 
     // --- Specifications ---
 
-    /// Chain key of the first `len` bytes of `word`: 1–32 bytes, no NUL, ASCII A–Z lowercased.
-    function _lowerKey(
+    /// Chain key of the exact first `len` bytes of `word`: 1–32 bytes, no NUL.
+    function _exactKey(
         bytes32 word,
         uint256 len
     ) internal pure returns (bool valid, uint256 key) {
@@ -119,8 +119,7 @@ contract AxelarStringsSymbolicTest is Test {
                 let b := byte(i, word)
                 let inRange := lt(i, len)
                 valid := and(valid, or(iszero(inRange), iszero(iszero(b))))
-                let up := and(gt(b, 0x40), lt(b, 0x5b))
-                key := or(key, shl(mul(8, sub(31, i)), mul(inRange, add(b, mul(up, 0x20)))))
+                key := or(key, shl(mul(8, sub(31, i)), mul(inRange, b)))
             }
             valid := and(valid, and(gt(len, 0), lt(len, 33)))
         }
@@ -139,18 +138,13 @@ contract AxelarStringsSymbolicTest is Test {
         }
     }
 
-    /// `p` is a nonempty name followed only by zero bytes, with no ASCII uppercase.
+    /// `p` is a nonempty name followed only by zero bytes.
     function _isCanonical(
         uint256 p
     ) internal pure returns (bool ok) {
         uint256 n = _firstZero(bytes32(p));
         assembly ("memory-safe") {
-            let upper := 0
-            for { let i := 0 } lt(i, 32) { i := add(i, 1) } {
-                let b := byte(i, p)
-                upper := or(upper, and(gt(b, 0x40), lt(b, 0x5b)))
-            }
-            ok := and(and(gt(n, 0), iszero(and(p, shr(shl(3, n), not(0))))), iszero(upper))
+            ok := and(gt(n, 0), iszero(and(p, shr(shl(3, n), not(0)))))
         }
     }
 
@@ -267,13 +261,13 @@ contract AxelarStringsSymbolicTest is Test {
 
     // --- Chain names ---
 
-    /// `chainKey` lowercases and packs exactly the valid names (lengths 0, 1–32 and > 32, NUL anywhere, bytes
+    /// `chainKey` exactly packs valid names (lengths 0, 1–32 and > 32, NUL anywhere, bytes
     /// ≥ 0x80, dirty padding) and rejects the rest with `InvalidChainName`.
     function check_chainKeyMatchesSpec(
         bytes32 word,
         uint256 length
     ) public view {
-        (bool valid, uint256 key) = _lowerKey(word, length);
+        (bool valid, uint256 key) = _exactKey(word, length);
         (bool ok, bytes memory ret) =
             address(h).staticcall(abi.encodeCall(AxelarStringsSymbolicHarness.keyOf, (word, length)));
         if (valid) {
@@ -391,10 +385,10 @@ contract AxelarStringsSymbolicTest is Test {
     // --- Specification self-test (runs in the normal suite) ---
 
     function testSpecVectors() public pure {
-        (bool valid, uint256 key) = _lowerKey(bytes32("Base"), 4);
+        (bool valid, uint256 key) = _exactKey(bytes32("Base"), 4);
         assertTrue(valid, "Base valid");
-        assertEq(key, uint256(bytes32("base")), "Base key");
-        (valid,) = _lowerKey(bytes32(0), 0);
+        assertEq(key, uint256(bytes32("Base")), "Base key");
+        (valid,) = _exactKey(bytes32(0), 0);
         assertFalse(valid, "empty valid");
         assertEq(_firstZero(bytes32("base")), 4, "firstZero");
 

@@ -7,9 +7,9 @@ import { LibString } from "solady/utils/LibString.sol";
 /// @title AxelarStrings
 /// @notice Conversions between Axelar's string identifiers and the OIF's packed integers: chain names ↔ chain-map
 /// keys, and address strings → 32-byte identifiers.
-/// @dev Chain names: the key is the ASCII-lowercased name packed left-aligned and zero-padded,
-/// `uint256(bytes32(bytes(name)))`. Names are 1–32 bytes without NUL; no character set is imposed. Axelar compares
-/// names ASCII-case-insensitively, so lowercasing gives each chain exactly one key.
+/// @dev Chain names: the key is the exact name packed left-aligned and zero-padded,
+/// `uint256(bytes32(bytes(name)))`. Names are 1–32 bytes without NUL; no character set is imposed.
+/// Case-distinct names have distinct keys.
 ///
 /// Addresses: the format is inferred from the string's shape. EVM: `0x`-prefixed 20-byte hex, left-padded into the
 /// identifier. Stellar: 56-character contract StrKey (`C...`, version byte 0x10) whose CRC16-XModem checksum is
@@ -40,10 +40,10 @@ library AxelarStrings {
     /// @dev CRC16-XModem of the contract StrKey version byte 0x10.
     uint256 private constant CRC_VERSION = 0x1231;
 
-    /// @notice ASCII-lowercases `name` and packs it left-aligned, word-at-a-time.
-    /// @dev Only 0x41–0x5a change (by setting bit 0x20); bytes ≥ 0x80 are left as is.
-    /// @param name Axelar chain name, in any ASCII case.
-    /// @return packed Packed lowercase name.
+    /// @notice Packs the exact bytes of `name` left-aligned, word-at-a-time.
+    /// @dev Rejects empty names, names longer than 32 bytes, and NUL bytes; ignores dirty padding.
+    /// @param name Exact Axelar chain name.
+    /// @return packed Packed case-sensitive name.
     function chainKey(
         string memory name
     ) internal pure returns (uint256 packed) {
@@ -60,13 +60,7 @@ library AxelarStrings {
             // keep a zero tail. The has-zero-byte test is exact for a yes/no answer.
             let v := or(w, and(tail, ones))
             nul := iszero(iszero(and(and(sub(v, ones), not(v)), highs)))
-            // With high bits cleared each byte is ≤ 0x7f, so adding ≤ 0x3f per byte never carries across bytes.
-            // Bit 7 of (b + 0x3f) is set iff b ≥ 0x41; of (b + 0x25) iff b ≥ 0x5b.
-            let low := and(w, not(highs))
-            let ge41 := and(add(low, mul(0x3f, ones)), highs)
-            let ge5b := and(add(low, mul(0x25, ones)), highs)
-            // Uppercase ASCII: ≥ 0x41, < 0x5b, and the original high bit clear; move bit 7 to bit 5.
-            packed := or(w, shr(2, and(and(ge41, not(ge5b)), not(w))))
+            packed := w
         }
         if (nul) revert InvalidChainName();
     }

@@ -36,7 +36,7 @@ interface IAxelarNativeGasService {
 /// @title AxelarOracle
 /// @notice Transparent Axelar GMP oracle with owner-set, immutable chain maps.
 /// @dev The owner maps an Axelar chain to an OIF chain through `ChainMap.setChainMap(key, chainId)`, where `key` is
-/// the ASCII-lowercased Axelar name packed left-aligned and zero-padded: `uint256(bytes32(bytes(name)))`. The setter
+/// the exact Axelar name packed left-aligned and zero-padded: `uint256(bytes32(bytes(name)))`. The setter
 /// accepts only names Axelar can route (1–20 ASCII bytes without NUL or `_`), so `reverseChainIdMap(chainId)` returns
 /// the packed name, which `submit` unpacks into the outbound chain name.
 /// Inbound sender formats (EVM hex, Stellar StrKey, Solana base58) are inferred from the
@@ -71,11 +71,11 @@ contract AxelarOracle is BaseInputOracle, ChainMap {
         gasService = IAxelarNativeGasService(gasService_);
     }
 
-    /// @notice Sets an immutable map from a packed lowercase Axelar name to an OIF chain ID.
-    /// @dev `protocolChainIdentifier` must be `uint256(bytes32(bytes(name)))` for a name Axelar's `ChainNameRaw`
-    /// accepts (1–20 bytes, ASCII only, no `_`), with no NUL and no ASCII uppercase. Anything else (zero,
-    /// right-aligned, bytes after a NUL, uppercase, too long, non-ASCII, `_`) reverts `AxelarStrings.InvalidChainName`:
-    /// the map is set-once, so a name Axelar cannot route would permanently consume `chainId`.
+    /// @notice Sets an immutable map from an exact packed Axelar name to an OIF chain ID.
+    /// @dev `protocolChainIdentifier` must be `uint256(bytes32(bytes(name)))` for the canonical Axelar spelling.
+    /// Names must be 1–20 ASCII bytes without NUL or `_`. Zero, right-aligned keys, bytes after a NUL,
+    /// too-long names, non-ASCII and `_` revert `AxelarStrings.InvalidChainName`. Case is preserved, not validated:
+    /// the owner must register the correct spelling because the map is set-once.
     function setChainMap(
         uint256 protocolChainIdentifier,
         uint256 chainId
@@ -126,6 +126,7 @@ contract AxelarOracle is BaseInputOracle, ChainMap {
     /// @notice Records the payload hashes of a gateway-approved message.
     /// @dev Anyone may execute, but only the gateway can approve the exact destination-bound message. The original
     /// `sourceChain` and `sourceAddress` strings are validated, since Axelar binds the approved spelling.
+    /// `sourceChain` must match the registered name byte-for-byte, including case.
     function execute(
         bytes32 commandId,
         string calldata sourceChain,
