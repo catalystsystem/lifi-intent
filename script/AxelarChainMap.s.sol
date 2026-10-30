@@ -7,9 +7,9 @@ import { AxelarOracle } from "../src/integrations/oracles/axelar/AxelarOracle.so
 import { AxelarStrings } from "../src/integrations/oracles/axelar/AxelarStrings.sol";
 
 /// @notice Configures one permanent Axelar route; broadcast with the oracle's owner.
-/// Names must be canonical Axelar chain names: 1–20 ASCII bytes, no NUL or `_`, already lowercase. The script rejects
-/// a wrongly cased or malformed name before broadcasting; the oracle's setter enforces the length and character rules,
-/// and Forge simulates that call before broadcasting, so an invalid name never reaches the permanent map.
+/// Mapping names are lowercase lookup keys: 1–20 ASCII bytes, no NUL or `_`. Register `ethereum` for `Ethereum`;
+/// submit callers supply Axelar's exact outbound spelling separately. The script rejects uppercase and malformed
+/// packing; the oracle's setter enforces the remaining format rules during Forge's pre-broadcast simulation.
 ///
 /// Usage (omit --broadcast for a dry run):
 ///   forge script script/AxelarChainMap.s.sol:ConfigureAxelarChainMap \
