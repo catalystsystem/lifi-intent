@@ -63,6 +63,9 @@
     },
     "robinhood": {
       "wormhole": "0x141fBa8AD5D61bdaB45A047cF60b5Ad9784987FB"
+    },
+    "elysium": {
+      "wormhole": "0xC8aD24fC6063c41cB5C12a8e3851AafC3b3CF027"
     }
   },
   "chainids": [

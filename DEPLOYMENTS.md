@@ -119,7 +119,7 @@ constructor(address mailbox, address customHook, address ism)   // customHook = 
 `WormholeOracle` is deployed per chain with `script/wormhole.s.sol` against that chain's Wormhole **Core
 Bridge**. Deployments use CREATE2 (`salt = 0`) through the canonical factory
 `0x4e59b44847b379578588920ca78fbf26c0b4956c`. The constructor binds the owner and the local Core Bridge, so the
-address is shared only by chains with the same owner and Core Bridge (Ethereum/BSC, Base/Tempo, Unichain/Ink).
+address is shared only by chains with the same owner and Core Bridge (Ethereum/BSC, Base/Tempo, Unichain/Ink, Arc/Elysium).
 
 ```
 constructor(address owner, address wormhole)   // wormhole = local Core Bridge
@@ -152,6 +152,7 @@ constructor(address owner, address wormhole)   // wormhole = local Core Bridge
 | Tempo | 4217 | 68 | [0xbebdb6C8ddC678FfA9f8748f85C815C556Dd8ac6](https://explore.mainnet.tempo.xyz/address/0xbebdb6C8ddC678FfA9f8748f85C815C556Dd8ac6) | _pending API-1125_ |
 | Arc | 5042 | 71 | `0xC8aD24fC6063c41cB5C12a8e3851AafC3b3CF027` | _pending API-1125_ |
 | Robinhood Chain | 4663 | 72 | `0x141fBa8AD5D61bdaB45A047cF60b5Ad9784987FB` | _pending API-1125_ |
+| Elysium | 99901 | 74 | `0xC8aD24fC6063c41cB5C12a8e3851AafC3b3CF027` | _pending deploy_ |
 
 ### Testnets
 
