@@ -8,8 +8,8 @@ import { LibString } from "solady/utils/LibString.sol";
 /// @notice Conversions between Axelar's string identifiers and the OIF's packed integers: chain names ↔ chain-map
 /// keys, and address strings → 32-byte identifiers.
 /// @dev Chain names: the key is the ASCII-lowercased name packed left-aligned and zero-padded,
-/// `uint256(bytes32(bytes(name)))`. Names are 1–32 bytes without NUL; no character set is imposed. Axelar compares
-/// names ASCII-case-insensitively, so lowercasing gives each chain exactly one key.
+/// `uint256(bytes32(bytes(name)))`. Names are 1–32 bytes without NUL; no character set is imposed.
+/// ASCII case variants share an internal lookup key; strings sent to Axelar must keep their original spelling.
 ///
 /// Addresses: the format is inferred from the string's shape. EVM: `0x`-prefixed 20-byte hex, left-padded into the
 /// identifier. Stellar: 56-character contract StrKey (`C...`, version byte 0x10) whose CRC16-XModem checksum is
