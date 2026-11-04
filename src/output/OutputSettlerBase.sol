@@ -229,6 +229,9 @@ abstract contract OutputSettlerBase is IAttester, BaseInputOracle {
      * and scenarios where multiple parties might attempt to fill the same output.
      * @param orderId The unique identifier of the order.
      * @param output The `MandateOutput` struct to fill.
+     * @param fillDeadline MUST equal the signed order's `fillDeadline`. This is a caller-supplied guard only. It is
+     * not validated against the order, which this contract never sees. A larger value lets a late fill SUCCEED, and
+     * `finalise` will then permanently reject the claim with `FilledTooLate`.
      * @param fillerData The solver data containing the proposed solver.
      * @return fillRecordHash The hash of the fill record.
      */
@@ -263,6 +266,9 @@ abstract contract OutputSettlerBase is IAttester, BaseInputOracle {
      * and ensures consistent solver attribution across all outputs in a multi-output order.
      * @param orderId The unique identifier of the order.
      * @param outputs Array of `MandateOutput` structs to fill
+     * @param fillDeadline MUST equal the signed order's `fillDeadline`. This is a caller-supplied guard only. It is
+     * not validated against the order, which this contract never sees. A larger value lets a late fill SUCCEED, and
+     * `finalise` will then permanently reject the claim with `FilledTooLate`.
      * @param fillerData The solver data containing the proposed solver.
      */
     function fillOrderOutputs(
