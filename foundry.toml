@@ -12,6 +12,8 @@ fuzz.runs = 10_000
 fs_permissions = [
     { access = "read-write", path = "./script/wormhole.json" },
     { access = "read-write", path = "./script/polymer.json" },
+    { access = "read", path = "./script/axelar.json" },
+    { access = "read", path = "./script/ccip.json" },
     { access = "read", path = "./test/oracle/broadcaster/payloads/ethereum-sepolia" },
 ]
 
