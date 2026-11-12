@@ -21,6 +21,7 @@
     "ink": { "chainId": 57073, "router": "0xca7c90A52B44E301AC01Cb5EB99b2fD99339433A" },
     "worldchain": { "chainId": 480, "router": "0x5fd9E4986187c56826A3064954Cfa2Cf250cfA0f" },
     "hyperevm": { "chainId": 999, "router": "0x13b3332b66389B1467CA6eBd6fa79775CCeF65ec" },
-    "mantle": { "chainId": 5000, "router": "0x670052635a9850bb45882Cb2eCcF66bCff0F41B7" }
+    "mantle": { "chainId": 5000, "router": "0x670052635a9850bb45882Cb2eCcF66bCff0F41B7" },
+    "xlayer": { "chainId": 196, "router": "0xF2b6Cb7867EB5502C3249dD37D7bc1Cc148e5232" }
   }
 }
