@@ -161,3 +161,59 @@ constructor(address owner, address wormhole)   // wormhole = local Core Bridge
 | Base Sepolia | 84532 | 10004 | [0x79A1027a6A159502049F10906D333EC57E95F083](https://sepolia.basescan.org/address/0x79A1027a6A159502049F10906D333EC57E95F083) | _pending API-1125_ |
 | Arbitrum Sepolia | 421614 | 10003 | [0x6b9C8671cdDC8dEab9c719bB87cBd3e782bA6a35](https://sepolia.arbiscan.io/address/0x6b9C8671cdDC8dEab9c719bB87cBd3e782bA6a35) | _pending API-1125_ |
 | Optimism Sepolia | 11155420 | 10005 | [0x31377888146f3253211EFEf5c676D41ECe7D58Fe](https://sepolia-optimism.etherscan.io/address/0x31377888146f3253211EFEf5c676D41ECe7D58Fe) | _pending API-1125_ |
+
+## X Layer mainnet
+
+X Layer (`196`) uses the current LI.FI settlers below, rather than the older
+settler addresses listed above. InputSettlerCompact is not deployed.
+
+| Contract | Address |
+| -------- | ------- |
+| InputSettlerEscrowLIFI | `0x00fC00edbe7C003b006f870068c548940000223e` |
+| OutputSettlerSimple | `0x75220B7600c300005038432a0000f308e0000068` |
+| CatapultarFactory | `0x4CfcE55F37EAfC998FE8B45e5732625018358606` |
+| Catapultar template | `0x93ed9655B9b86E70314Fa3CE77bfBE78159f53bD` |
+| Refund relayer smart account | `0xA84b6BE6Af0750916074f1e43E0b94358681dCC6` |
+
+Deployments replay the canonical CREATE2 payloads through
+`0x4e59b44847b379578588920ca78fbf26c0b4956c`. Settler provenance is
+`broadcast/deploy.s.sol/988/run-1786106534543.json`; wallet provenance is the
+wallet service's `deploy-canonical-contracts` manifest. Do not rebuild the wallet
+contracts: the producing source is unavailable, so their explorer source
+verification is blocked even though canonical runtime hashes are verified.
+
+The output settler runtime matches Base exactly. The escrow runtime differs
+only at its cached chain ID and EIP-712 domain separator, both validated for
+chain `196`; every other byte matches Base. Its governance owner remains
+`0xAB483D44705Af49a83553821A1F7aAd8BBc70576`.
+
+The refund account owner is `0x16911388d6F049EF8aA8E88b4972092dD87eCCB9`
+(dev wallet project `0b4ff1d2-ddbe-4778-9fc6-c7d94b4ce3cb`).
+Deployment does not onboard the wallet service or configure its executor.
+
+The escrow, output settler, and CCIP oracle have matching creation and runtime
+source verification on [Sourcify](https://repo.sourcify.dev/196).
+
+Receipts, exact transaction inputs, and runtime verification evidence are in
+[`broadcast/xlayer/196/deploy-20261111.json`](broadcast/xlayer/196/deploy-20261111.json).
+
+## ChainlinkCCIPOracle
+
+CCIP is the only oracle deployed for X Layer. The constructor sets the owner
+and immutable local router; it does not configure chain maps. The oracle-owner
+service must configure those maps separately before proofs can be received.
+
+| Chain | Chain ID | Selector | Router | ChainlinkCCIPOracle |
+| ----- | -------- | -------- | ------ | ------------------- |
+| X Layer | 196 | `3016212468291539606` | `0xF2b6Cb7867EB5502C3249dD37D7bc1Cc148e5232` | `0xed11377e6851fe83752eaa4575334e2f8673f56e` |
+
+Owner: `0x712E90032d8f44bE276A903E1769d64dD1C7F45a` (intents-oracle-owner).
+X Layer has lanes to configured EVM chains `1`, `56`, `100`, `143`, `5000`,
+`8453`, `9745`, `42161`, `43114`, and `57073`. A configured chain map alone
+does not establish lane availability.
+
+Deployment reuses the audited Base creation bytecode from
+`broadcast/multi/ccip.s.sol-1793337781535/run.json` (`25b2a01`), salt zero,
+and the X Layer router constructor argument. Runtime verification requires
+exact byte equality after substituting the immutable router; a raw runtime
+hash cannot match Base because the local routers differ.
