@@ -65,7 +65,8 @@
       "wormhole": "0x141fBa8AD5D61bdaB45A047cF60b5Ad9784987FB"
     },
     "elysium": {
-      "wormhole": "0xC8aD24fC6063c41cB5C12a8e3851AafC3b3CF027"
+      "wormhole": "0xC8aD24fC6063c41cB5C12a8e3851AafC3b3CF027",
+      "oracle": "0x9c1634E0DB7d24250A9988A2C4b1E5a3A42D429E"
     }
   },
   "chainids": [
