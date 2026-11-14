@@ -1,0 +1,26 @@
+{
+  "implementation": {
+    "ethereum": { "chainId": 1, "router": "0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D" },
+    "base": { "chainId": 8453, "router": "0x881e3A65B4d4a04dD529061dd0071cf975F58bCD" },
+    "optimism": { "chainId": 10, "router": "0x3206695CaE29952f4b0c22a169725a865bc8Ce0f" },
+    "arbitrum": { "chainId": 42161, "router": "0x141fa059441E0ca23ce184B6A78bafD2A517DdE8" },
+    "polygon": { "chainId": 137, "router": "0x849c5ED5a80F5B408Dd4969b78c2C8fdf0565Bfe" },
+    "bsc": { "chainId": 56, "router": "0x34B03Cb9086d7D758AC55af71584F81A598759FE" },
+    "katana": { "chainId": 747474, "router": "0x7c19b79D2a054114Ab36ad758A36e92376e267DA" },
+    "robinhood": { "chainId": 4663, "router": "0x06fC836cf9839B1cd891C440A0a45242DA6Ae1c9" },
+    "arc": { "chainId": 5042, "router": "0xB79791184973589c38e114D43Eb8E4588C283A18" },
+    "tempo": { "chainId": 4217, "router": "0xa132F089492CcE5f1D79483a9e4552f37266ed01" },
+    "pharos": { "chainId": 1672, "router": "0x4e52dD94e9BCfeFE3C78153bDfB0AB1d30687297" },
+    "plasma": { "chainId": 9745, "router": "0xcDca5D374e46A6DDDab50bD2D9acB8c796eC35C3" },
+    "unichain": { "chainId": 130, "router": "0x68891f5F96695ECd7dEdBE2289D1b73426ae7864" },
+    "avalanche": { "chainId": 43114, "router": "0xF4c7E640EdA248ef95972845a62bdC74237805dB" },
+    "monad": { "chainId": 143, "router": "0x33566fE5976AAa420F3d5C64996641Fc3858CaDB" },
+    "gnosis": { "chainId": 100, "router": "0x4aAD6071085df840abD9Baf1697d5D5992bDadce" },
+    "stable": { "chainId": 988, "router": "0xECFF67559c0583027A5fbd85136E33bC4D66eeA0" },
+    "celo": { "chainId": 42220, "router": "0xfB48f15480926A4ADf9116Dca468bDd2EE6C5F62" },
+    "ink": { "chainId": 57073, "router": "0xca7c90A52B44E301AC01Cb5EB99b2fD99339433A" },
+    "worldchain": { "chainId": 480, "router": "0x5fd9E4986187c56826A3064954Cfa2Cf250cfA0f" },
+    "hyperevm": { "chainId": 999, "router": "0x13b3332b66389B1467CA6eBd6fa79775CCeF65ec" },
+    "mantle": { "chainId": 5000, "router": "0x670052635a9850bb45882Cb2eCcF66bCff0F41B7" }
+  }
+}
